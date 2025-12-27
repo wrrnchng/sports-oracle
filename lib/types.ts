@@ -171,11 +171,15 @@ export interface TeamScheduleEvent {
     id: string
     date: string
     seasonType: number
+    league?: { slug: string }
+    season?: { slug: string, year?: number, displayName?: string }
     result?: string // W/L often not directly here, inferred from score
     competitions: Array<{
         id: string
         date: string
         attendance?: number
+        league?: { slug: string }
+        season?: { slug: string }
         type: { id: string, abbreviation: string }
         status: { type: { state: string, completed: boolean, name: string, description?: string } }
         venue?: { fullName: string }

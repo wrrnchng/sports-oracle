@@ -6,9 +6,12 @@ import { TeamInfo, TeamSchedule, formatInManila } from '@/lib/types'
 import { MatchStatsCard } from './match-stats-card'
 import { StandingsTable } from './standings-table'
 import { H2HStats } from './h2h-stats'
-import { calculateTeamStats } from '@/lib/stats-utils'
+import { calculateTeamStats, calculateAdvancedStats, AdvancedStats } from '@/lib/stats-utils'
 import { TeamFormCard } from './team-form-card'
 import { FormComparison } from './form-comparison'
+import { SoccerStatBreakdown } from './soccer-stat-breakdown'
+import { DefensiveStatsCard } from './defensive-stats-card'
+import { LeagueDetailedBreakdown } from './league-detailed-breakdown'
 import { useMemo } from 'react'
 import { getTeamLogo } from '@/lib/logo-utils'
 
@@ -52,6 +55,13 @@ export function TeamStatsView({ sport }: TeamStatsViewProps) {
     const [opponentSchedule, setOpponentSchedule] = useState<TeamSchedule | null>(null)
     const [loadingOpponentSchedule, setLoadingOpponentSchedule] = useState(false)
 
+    // Advanced Stats State
+    const [advancedStats, setAdvancedStats] = useState<{
+        team1: AdvancedStats | null,
+        team2: AdvancedStats | null
+    }>({ team1: null, team2: null })
+    const [loadingAdvanced, setLoadingAdvanced] = useState(false)
+
     // Reset when sport changes
     useEffect(() => {
         const availableLeagues = LEAGUES[sport] || []
@@ -61,6 +71,7 @@ export function TeamStatsView({ sport }: TeamStatsViewProps) {
         setSelectedTeam(null)
         setSchedule(null)
         setOpponentSchedule(null)
+        setAdvancedStats({ team1: null, team2: null })
     }, [sport])
 
     // Fetch Teams when league changes
@@ -221,6 +232,60 @@ export function TeamStatsView({ sport }: TeamStatsViewProps) {
 
         return () => { mounted = false }
     }, [selectedTeam, opponentId, sport, league])
+
+    // Fetch Advanced Stats when schedules are ready
+    useEffect(() => {
+        if (!selectedTeam || !opponentId || !schedule || !opponentSchedule) {
+            setAdvancedStats({ team1: null, team2: null })
+            return
+        }
+
+        let mounted = true
+        setLoadingAdvanced(true)
+
+        const apiSport = sport === 'football' ? 'soccer' : (sport === 'nfl' || sport === 'ncaaf') ? 'football' : sport
+        // Identify games for each
+        const isAdvancedSeasonal = apiSport === 'basketball' || apiSport === 'football'
+
+        const team1Events = (schedule.events || [])
+            .filter(e => e.competitions?.[0]?.status?.type?.completed)
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+            .slice(0, isAdvancedSeasonal ? undefined : 15) // All for NBA/NFL, 15 for Soccer
+
+        const team2Events = (opponentSchedule.events || [])
+            .filter(e => e.competitions?.[0]?.status?.type?.completed)
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+            .slice(0, isAdvancedSeasonal ? undefined : 15)
+
+        if (team1Events.length === 0 || team2Events.length === 0) {
+            setLoadingAdvanced(false)
+            return
+        }
+
+        const fetchAll = async () => {
+            try {
+                const [res1, res2] = await Promise.all([
+                    fetch(`/api/summaries/batch?sport=${apiSport}&league=${league}&eventIds=${team1Events.map(e => e.id).join(',')}`),
+                    fetch(`/api/summaries/batch?sport=${apiSport}&league=${league}&eventIds=${team2Events.map(e => e.id).join(',')}`)
+                ])
+                const [sums1, sums2] = await Promise.all([res1.json(), res2.json()])
+
+                if (mounted) {
+                    setAdvancedStats({
+                        team1: calculateAdvancedStats(sums1, selectedTeam.id, apiSport),
+                        team2: calculateAdvancedStats(sums2, opponentId, apiSport)
+                    })
+                    setLoadingAdvanced(false)
+                }
+            } catch (err) {
+                console.error('Failed to fetch advanced stats:', err)
+                if (mounted) setLoadingAdvanced(false)
+            }
+        }
+
+        fetchAll()
+        return () => { mounted = false }
+    }, [selectedTeam?.id, opponentId, schedule?.events, opponentSchedule?.events, sport, league])
 
     const availableLeagues = LEAGUES[sport] || []
 
@@ -394,6 +459,58 @@ export function TeamStatsView({ sport }: TeamStatsViewProps) {
                                     />
                                 )
                             })()}
+
+                            {/* Advanced Breakdown */}
+                            <div className="space-y-4">
+                                <div className="flex items-center justify-between">
+                                    <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                                        <Info className="w-5 h-5 text-indigo-400" />
+                                        Detailed Performance Breakdown
+                                    </h3>
+                                    {loadingAdvanced && <Loader2 className="w-4 h-4 animate-spin text-zinc-500" />}
+                                </div>
+
+                                {advancedStats.team1 && advancedStats.team2 && selectedTeam ? (
+                                    sport === 'football' && advancedStats.team1.soccer && advancedStats.team2.soccer ? (
+                                        <SoccerStatBreakdown
+                                            team1={{
+                                                name: selectedTeam.displayName,
+                                                stats: advancedStats.team1.soccer.fullTime
+                                            }}
+                                            team2={{
+                                                name: upcomingMatch?.competitions?.[0]?.competitors?.find(c => c.team.id === opponentId)?.team?.displayName || 'Opponent',
+                                                stats: advancedStats.team2.soccer.fullTime
+                                            }}
+                                            fullTime={{ t1: advancedStats.team1.soccer.fullTime, t2: advancedStats.team2.soccer.fullTime }}
+                                            halfTime={{ t1: advancedStats.team1.soccer.halfTime, t2: advancedStats.team2.soccer.halfTime }}
+                                            secondHalf={{ t1: advancedStats.team1.soccer.secondHalf, t2: advancedStats.team2.soccer.secondHalf }}
+                                        />
+                                    ) : (sport === 'basketball' || sport === 'nfl') && (advancedStats.team1.basketball || advancedStats.team1.nfl) ? (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            <DefensiveStatsCard
+                                                sport={sport}
+                                                basketball={advancedStats.team1.basketball}
+                                                nfl={advancedStats.team1.nfl}
+                                                teamName={selectedTeam.displayName}
+                                            />
+                                            <DefensiveStatsCard
+                                                sport={sport}
+                                                basketball={advancedStats.team2.basketball}
+                                                nfl={advancedStats.team2.nfl}
+                                                teamName={upcomingMatch?.competitions?.[0]?.competitors?.find(c => c.team.id === opponentId)?.team?.displayName || 'Opponent'}
+                                            />
+                                        </div>
+                                    ) : null
+                                ) : !loadingAdvanced ? (
+                                    <div className="p-12 text-center bg-zinc-900/20 rounded-2xl border border-zinc-800 border-dashed">
+                                        <p className="text-zinc-500 italic">Select an opponent match to view detailed breakdowns.</p>
+                                    </div>
+                                ) : (
+                                    <div className="p-12 flex justify-center">
+                                        <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     )}
 
@@ -528,15 +645,17 @@ export function TeamStatsView({ sport }: TeamStatsViewProps) {
                         </div>
                     </div>
 
-                    {/* Standings Table - Always show below details if team is selected */}
-                    <div className="mt-8">
+                    {/* Standings Table & Detailed Breakdown - Always show below details if team is selected */}
+                    <div className="space-y-8 mt-8">
                         <StandingsTable sport={sport} league={league} />
+                        <LeagueDetailedBreakdown sport={sport} league={league} />
                     </div>
                 </div>
             ) : (
                 <div className="flex flex-col gap-6">
-                    {/* Standings Table - Show as main view if no team selected */}
+                    {/* Main League View: Standings & Detailed Breakdown */}
                     <StandingsTable sport={sport} league={league} />
+                    <LeagueDetailedBreakdown sport={sport} league={league} />
                 </div>
             )}
 

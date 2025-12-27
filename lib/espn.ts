@@ -24,8 +24,17 @@ export async function getStandings(sport: string, league: string): Promise<Stand
   }
 
   try {
+    console.log(`[getStandings] Fetching: ${url}`)
     const response = await fetch(url)
-    if (!response.ok) throw new Error(`API Error: ${response.statusText}`)
+    console.log(`[getStandings] Response status: ${response.status} ${response.statusText}`)
+
+    if (!response.ok) {
+      // Try to get the response body for debugging
+      const text = await response.text()
+      console.error(`[getStandings] ESPN API Error Response:`, text.substring(0, 500))
+      throw new Error(`API Error: ${response.statusText}`)
+    }
+
     const data = await response.json()
 
     // 1. Try finding standings at root or first child (common cases)
@@ -309,6 +318,14 @@ export async function getTeamSchedule(sport: string, league: string, teamId: str
             // Merge events that aren't already in the list
             typeData.events.forEach(event => {
               if (!data.events.some(e => e.id === event.id)) {
+                // Ensure league slug is present for filtering later
+                // We inject it into both the event and competitions[0] to be safe
+                if (!event.league?.slug) {
+                  (event as any).league = { ...(event as any).league, slug: league };
+                }
+                if (event.competitions?.[0] && !event.competitions[0].league?.slug) {
+                  (event.competitions[0] as any).league = { ...(event.competitions[0] as any).league, slug: league };
+                }
                 data.events.push(event)
               }
             })
@@ -434,6 +451,37 @@ export async function getGameSummary(sport: string, league: string, eventId: str
   // Cache Summary for 60 seconds (Live stats update often)
   // Or 5 minutes if finished, but handling that logic is complex. 60s is safe.
   return fetchWithCache<GameSummary>(`summary:${sport}:${league}:${eventId}`, url, 60)
+}
+
+/**
+ * Fetches multiple game summaries in parallel.
+ * Includes a small delay between batches if needed to avoid rate limiting.
+ */
+export async function getGameSummariesBatch(sport: string, league: string, eventIds: string[]): Promise<GameSummary[]> {
+  const BATCH_SIZE = 5
+  const results: GameSummary[] = []
+
+  for (let i = 0; i < eventIds.length; i += BATCH_SIZE) {
+    const batch = eventIds.slice(i, i + BATCH_SIZE)
+    const batchResults = await Promise.all(
+      batch.map(async id => {
+        try {
+          return await getGameSummary(sport, league, id)
+        } catch (e) {
+          console.error(`Failed to fetch summary for event ${id}:`, e)
+          return null
+        }
+      })
+    )
+    results.push(...batchResults.filter((r): r is GameSummary => r !== null))
+
+    // Tiny delay between batches to be safe
+    if (i + BATCH_SIZE < eventIds.length) {
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+  }
+
+  return results
 }
 
 export async function getTeamRoster(sport: string, league: string, teamId: string): Promise<RosterResponse> {

@@ -6,7 +6,8 @@ import { GameCountdown } from "./game-countdown"
 import type { ScoreboardEvent } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { formatInManila } from "@/lib/types"
-import { MapPin, Calendar } from "lucide-react"
+import { MapPin, Calendar, Star } from "lucide-react"
+import { useFavorites } from "@/hooks/use-favorites"
 
 interface GameCardProps {
     event: ScoreboardEvent
@@ -24,6 +25,9 @@ export function GameCard({ event, sportType, showDate = false }: GameCardProps) 
     // Get home and away teams
     const homeTeam = competition.competitors.find(comp => comp.homeAway === 'home')
     const awayTeam = competition.competitors.find(comp => comp.homeAway === 'away')
+
+    const { toggleFavorite, isFavorite } = useFavorites()
+    const favorited = isFavorite(event.id)
 
     if (!homeTeam || !awayTeam) return null
 
@@ -45,115 +49,133 @@ export function GameCard({ event, sportType, showDate = false }: GameCardProps) 
             isUpcoming && "border-blue-500/30 bg-blue-500/5",
             sportColors[sportType]
         )}>
-            <CardContent className="p-6">
-                {/* Status Header */}
-                <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <CardContent className="p-3 relative">
+                {/* Status Header moved to absolute top-right or just minimal */}
+                <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
                         {showDate && (
                             <>
-                                <Calendar className="size-3" />
                                 <span>{formatInManila(gameDate, 'MMM d')}</span>
                                 <span>•</span>
                             </>
                         )}
-                        <span>
+                        <span className={cn(isLive && "text-red-500 font-bold")}>
                             {isUpcoming
-                                ? formatInManila(gameDate, 'MMM d, h:mm a')
+                                ? formatInManila(gameDate, 'h:mm a')
                                 : status.type.shortDetail
                             }
                         </span>
                     </div>
-                    {isLive && <LiveIndicator />}
+
+                    <div className="flex items-center gap-1">
+                        {isLive && <LiveIndicator />}
+                        <button
+                            onClick={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                toggleFavorite(event.id)
+                            }}
+                            className={cn(
+                                "p-1 rounded-full transition-all hover:bg-zinc-800/50 group/star",
+                                favorited ? "text-yellow-500" : "text-zinc-500 hover:text-yellow-400"
+                            )}
+                            title={favorited ? "Remove from favorites" : "Add to favorites"}
+                        >
+                            <Star className={cn(
+                                "size-4 transition-transform",
+                                favorited ? "fill-current scale-110" : "group-hover/star:scale-110"
+                            )} />
+                        </button>
+                    </div>
                 </div>
 
                 {/* Upcoming Game Time & Countdown */}
+                {/* Upcoming Game Time & Countdown */}
                 {isUpcoming && (
-                    <div className="text-center mb-4 p-3 bg-blue-500/10 rounded-lg border border-blue-500/20">
-                        <div className="flex items-center justify-center gap-2 mb-1">
-                            <span className="text-lg font-semibold text-blue-600 dark:text-blue-400">
-                                {formatInManila(gameDate, 'h:mm a')}
-                            </span>
-                        </div>
+                    <div className="mt-2 pt-2 border-t border-border/50">
                         <GameCountdown
                             gameDate={event.date}
-                            className="text-blue-600 dark:text-blue-400"
+                            className="text-[10px] text-blue-600 dark:text-blue-400 font-medium text-center"
                         />
                     </div>
                 )}
 
-                {/* Away Team */}
-                <div className="flex items-center justify-between mb-4 pb-4 border-b border-border">
-                    <div className="flex items-center gap-4 flex-1">
-                        {awayTeam.team.logo && (
-                            <img
-                                src={awayTeam.team.logo}
-                                alt={awayTeam.team.displayName}
-                                className="w-10 h-10 object-contain"
-                            />
-                        )}
-                        <div className="flex-1 min-w-0">
-                            <div className="text-lg font-bold truncate">
-                                {awayTeam.team.displayName}
-                            </div>
-                            {awayTeam.records && awayTeam.records[0] && (
-                                <div className="text-xs text-muted-foreground">
-                                    {awayTeam.records[0].summary}
-                                </div>
+                {/* Teams Grid */}
+                <div className="grid gap-2">
+                    {/* Away Team */}
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                            {awayTeam.team.logo && (
+                                <img
+                                    src={awayTeam.team.logo}
+                                    alt={awayTeam.team.displayName}
+                                    className="w-6 h-6 object-contain"
+                                />
                             )}
+                            <div className="flex-1 min-w-0">
+                                <div className="text-sm font-semibold truncate leading-none">
+                                    {awayTeam.team.displayName}
+                                </div>
+                                {awayTeam.records?.[0] && (
+                                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                                        {awayTeam.records[0].summary}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        <div className={cn(
+                            "text-xl font-bold ml-2 font-mono tabular-nums",
+                            awayTeam.winner && "text-primary"
+                        )}>
+                            {isUpcoming ? '-' : awayTeam.score}
                         </div>
                     </div>
-                    <div className={cn(
-                        "text-3xl font-black ml-6 font-mono",
-                        awayTeam.winner && "text-primary"
-                    )}>
-                        {isUpcoming ? '-' : awayTeam.score}
-                    </div>
-                </div>
 
-                {/* Home Team */}
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4 flex-1">
-                        {homeTeam.team.logo && (
-                            <img
-                                src={homeTeam.team.logo}
-                                alt={homeTeam.team.displayName}
-                                className="w-10 h-10 object-contain"
-                            />
-                        )}
-                        <div className="flex-1 min-w-0">
-                            <div className="text-lg font-bold truncate">
-                                {homeTeam.team.displayName}
-                            </div>
-                            {homeTeam.records && homeTeam.records[0] && (
-                                <div className="text-xs text-muted-foreground">
-                                    {homeTeam.records[0].summary}
-                                </div>
+                    {/* Home Team */}
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                            {homeTeam.team.logo && (
+                                <img
+                                    src={homeTeam.team.logo}
+                                    alt={homeTeam.team.displayName}
+                                    className="w-6 h-6 object-contain"
+                                />
                             )}
+                            <div className="flex-1 min-w-0">
+                                <div className="text-sm font-semibold truncate leading-none">
+                                    {homeTeam.team.displayName}
+                                </div>
+                                {homeTeam.records?.[0] && (
+                                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                                        {homeTeam.records[0].summary}
+                                    </div>
+                                )}
+                            </div>
                         </div>
-                    </div>
-                    <div className={cn(
-                        "text-3xl font-black ml-6 font-mono",
-                        homeTeam.winner && "text-primary"
-                    )}>
-                        {isUpcoming ? '-' : homeTeam.score}
+                        <div className={cn(
+                            "text-xl font-bold ml-2 font-mono tabular-nums",
+                            homeTeam.winner && "text-primary"
+                        )}>
+                            {isUpcoming ? '-' : homeTeam.score}
+                        </div>
                     </div>
                 </div>
 
                 {/* Venue Info */}
                 {competition.venue && (
-                    <div className="mt-4 pt-4 border-t border-border flex items-start gap-2 text-xs text-muted-foreground">
-                        <MapPin className="size-3 mt-0.5 flex-shrink-0" />
+                    <div className="mt-2 pt-2 border-t border-border/50 flex items-center gap-1 text-[10px] text-muted-foreground">
+                        <MapPin className="size-2.5 flex-shrink-0" />
                         <span className="line-clamp-1">{competition.venue.fullName}</span>
                     </div>
                 )}
 
                 {/* Period/Quarter Info for Live Games */}
                 {isLive && (
-                    <div className="mt-3 pt-3 border-t border-border flex items-center justify-between text-sm">
+                    <div className="mt-2 pt-2 border-t border-border/50 flex items-center justify-between text-xs">
                         <span className="text-muted-foreground">
-                            {sportType === 'football' ? 'Time' : 'Quarter'} {status.period}
+                            {sportType === 'football' ? 'Time' : 'Q'}{status.period}
                         </span>
-                        <span className="font-mono font-semibold">
+                        <span className="font-mono font-bold text-red-500">
                             {status.displayClock}
                         </span>
                     </div>

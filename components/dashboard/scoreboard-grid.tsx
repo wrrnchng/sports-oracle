@@ -3,7 +3,8 @@
 import { GameCard } from "./game-card"
 import type { Scoreboard } from "@/lib/types"
 import type { SportType } from "@/hooks/use-scores"
-import { Loader2, CalendarOff } from "lucide-react"
+import { Loader2, CalendarOff, Star } from "lucide-react"
+import { useFavorites } from "@/hooks/use-favorites"
 
 interface ScoreboardGridProps {
     data: Scoreboard | null
@@ -13,6 +14,7 @@ interface ScoreboardGridProps {
 }
 
 export function ScoreboardGrid({ data, isLoading, error, sportType }: ScoreboardGridProps) {
+    const { favorites } = useFavorites()
     if (isLoading) {
         return (
             <div className="flex items-center justify-center py-16">
@@ -56,19 +58,37 @@ export function ScoreboardGrid({ data, isLoading, error, sportType }: Scoreboard
         )
     }
 
-    // Separate live and non-live games
-    const liveGames = data.events.filter(
+    // Separate favorites and other games
+    const favoriteGames = data.events.filter(event => favorites.includes(event.id))
+    const otherGames = data.events.filter(event => !favorites.includes(event.id))
+
+    const liveGames = otherGames.filter(
         event => event.competitions[0]?.status.type.state === 'in'
     )
-    const upcomingGames = data.events.filter(
+    const upcomingGames = otherGames.filter(
         event => event.competitions[0]?.status.type.state === 'pre'
     )
-    const completedGames = data.events.filter(
+    const completedGames = otherGames.filter(
         event => event.competitions[0]?.status.type.completed
     )
 
     return (
         <div className="space-y-8">
+            {/* Favorites Section */}
+            {favoriteGames.length > 0 && (
+                <div className="animate-in fade-in slide-in-from-top-4 duration-500">
+                    <div className="flex items-center gap-2 mb-4">
+                        <Star className="size-5 text-yellow-500 fill-current" />
+                        <h2 className="text-xl font-semibold">Favorites ({favoriteGames.length})</h2>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {favoriteGames.map(event => (
+                            <GameCard key={event.id} event={event} sportType={sportType} />
+                        ))}
+                    </div>
+                    <div className="mt-8 border-b border-zinc-800/50" />
+                </div>
+            )}
             {/* Live Games Section */}
             {liveGames.length > 0 && (
                 <div>
@@ -79,7 +99,7 @@ export function ScoreboardGrid({ data, isLoading, error, sportType }: Scoreboard
                         </div>
                         <h2 className="text-xl font-semibold">Live Now ({liveGames.length})</h2>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {liveGames.map(event => (
                             <GameCard key={event.id} event={event} sportType={sportType} />
                         ))}
@@ -94,7 +114,7 @@ export function ScoreboardGrid({ data, isLoading, error, sportType }: Scoreboard
                         <span className="text-xl">📅</span>
                         <h2 className="text-xl font-semibold">Upcoming ({upcomingGames.length})</h2>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {upcomingGames.map(event => (
                             <GameCard key={event.id} event={event} sportType={sportType} />
                         ))}
@@ -109,7 +129,7 @@ export function ScoreboardGrid({ data, isLoading, error, sportType }: Scoreboard
                         <span className="text-xl">✅</span>
                         <h2 className="text-xl font-semibold">Final ({completedGames.length})</h2>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {completedGames.map(event => (
                             <GameCard key={event.id} event={event} sportType={sportType} />
                         ))}

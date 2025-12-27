@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { ChevronRight, Calendar, Info, MapPin, Loader2 } from 'lucide-react'
+import { ChevronRight, Calendar, Info, MapPin, Loader2, Star } from 'lucide-react'
 import { TeamInfo, TeamSchedule, formatInManila } from '@/lib/types'
+import { useFavorites } from '@/hooks/use-favorites'
 import { MatchStatsCard } from './match-stats-card'
 import { StandingsTable } from './standings-table'
 import { H2HStats } from './h2h-stats'
@@ -40,6 +41,7 @@ const LEAGUES: Record<string, { id: string, name: string }[]> = {
 }
 
 export function TeamStatsView({ sport }: TeamStatsViewProps) {
+    const { favorites, toggleFavorite, isFavorite } = useFavorites()
     const [league, setLeague] = useState('')
     const [teams, setTeams] = useState<TeamInfo[]>([])
     const [selectedTeam, setSelectedTeam] = useState<TeamInfo | null>(null)
@@ -162,8 +164,7 @@ export function TeamStatsView({ sport }: TeamStatsViewProps) {
     // 2. Head-to-Head opponent
     const opponentId = upcomingMatch?.competitions[0].competitors.find((c: any) => c.team.id !== selectedTeam?.id)?.team.id
 
-    // 3. Recent History (Completed matches)
-    const recentMatches = [...scheduleEvents]
+    const recentMatchesRaw = [...scheduleEvents]
         .filter(e => {
             const status = e.competitions?.[0]?.status?.type
             // If it's the current upcoming match, don't show it in recent history
@@ -172,7 +173,16 @@ export function TeamStatsView({ sport }: TeamStatsViewProps) {
             return status?.state === 'post' || status?.completed === true || new Date(e.date) < liveThreshold
         })
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        .slice(0, 10)
+
+    const recentMatches = useMemo(() => {
+        return [...recentMatchesRaw].sort((a, b) => {
+            const aFav = favorites.includes(a.id)
+            const bFav = favorites.includes(b.id)
+            if (aFav && !bFav) return -1
+            if (!aFav && bFav) return 1
+            return 0
+        }).slice(0, 10)
+    }, [recentMatchesRaw, favorites])
 
     // Fetch Opponent Schedule
     useEffect(() => {
@@ -521,8 +531,19 @@ export function TeamStatsView({ sport }: TeamStatsViewProps) {
                             {upcomingMatch ? (
                                 <div className="flex flex-col gap-4">
                                     <div className="flex items-center justify-between">
-                                        <div className="text-lg font-semibold text-white">
-                                            vs {upcomingMatch.competitions[0].competitors.find(c => c.team.id !== selectedTeam.id)?.team.displayName}
+                                        <div className="flex items-center gap-3">
+                                            <div className="text-lg font-semibold text-white">
+                                                vs {upcomingMatch.competitions[0].competitors.find(c => c.id !== selectedTeam.id)?.team.displayName}
+                                            </div>
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation()
+                                                    toggleFavorite(upcomingMatch.id)
+                                                }}
+                                                className={`p-1.5 rounded-full transition-colors ${isFavorite(upcomingMatch.id) ? 'text-yellow-500 hover:bg-yellow-500/10' : 'text-zinc-600 hover:bg-zinc-800'}`}
+                                            >
+                                                <Star className={`size-4 ${isFavorite(upcomingMatch.id) ? 'fill-current' : ''}`} />
+                                            </button>
                                         </div>
                                         <div className="px-3 py-1 rounded-full bg-indigo-500/10 text-indigo-400 text-xs font-medium border border-indigo-500/20">
                                             UPCOMING
@@ -569,11 +590,22 @@ export function TeamStatsView({ sport }: TeamStatsViewProps) {
                                                             }}
                                                             className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-zinc-800 transition-colors group text-left border border-transparent hover:border-zinc-700"
                                                         >
-                                                            <div className="flex flex-col">
-                                                                <span className="text-[10px] font-mono text-zinc-500">{date}</span>
-                                                                <span className="text-sm font-medium text-zinc-400 group-hover:text-white">
-                                                                    {us?.homeAway === 'home' ? 'vs' : '@'} {opponent?.team.abbreviation}
-                                                                </span>
+                                                            <div className="flex items-center gap-3">
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation()
+                                                                        toggleFavorite(match.id)
+                                                                    }}
+                                                                    className={`p-1.5 rounded-full transition-colors ${isFavorite(match.id) ? 'text-yellow-500 hover:bg-yellow-500/10' : 'text-zinc-600 hover:bg-zinc-800'}`}
+                                                                >
+                                                                    <Star className={`size-3 ${isFavorite(match.id) ? 'fill-current' : ''}`} />
+                                                                </button>
+                                                                <div className="flex flex-col">
+                                                                    <span className="text-[10px] font-mono text-zinc-500">{date}</span>
+                                                                    <span className="text-sm font-medium text-zinc-400 group-hover:text-white">
+                                                                        {us?.homeAway === 'home' ? 'vs' : '@'} {opponent?.team.abbreviation}
+                                                                    </span>
+                                                                </div>
                                                             </div>
                                                             <div className="flex items-center gap-3">
                                                                 <div className={`px-2 py-0.5 rounded text-[10px] font-bold ${isWin ? 'bg-emerald-500/10 text-emerald-500' : 'bg-zinc-500/10 text-zinc-500'}`}>
@@ -618,6 +650,15 @@ export function TeamStatsView({ sport }: TeamStatsViewProps) {
                                             className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-zinc-800 transition-colors group text-left"
                                         >
                                             <div className="flex items-center gap-3">
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation()
+                                                        toggleFavorite(match.id)
+                                                    }}
+                                                    className={`p-1.5 rounded-full transition-colors ${isFavorite(match.id) ? 'text-yellow-500 hover:bg-yellow-500/10' : 'text-zinc-600 hover:bg-zinc-800'}`}
+                                                >
+                                                    <Star className={`size-4 ${isFavorite(match.id) ? 'fill-current' : ''}`} />
+                                                </button>
                                                 <span className="text-xs font-mono text-zinc-500 w-12">{formattedDate}</span>
                                                 <div className="flex items-center gap-2">
                                                     <img src={opponent?.team.logos?.[0]?.href} className="w-5 h-5 object-contain" />

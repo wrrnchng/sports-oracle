@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server'
 import { getStandings, getTeamSchedule, getGameSummary } from '@/lib/espn'
 import { calculateAdvancedStats, AdvancedStats } from '@/lib/stats-utils'
 import { getCachedData, setCachedData } from '@/lib/db'
-import { Standings } from '@/lib/types'
 
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
@@ -13,10 +12,16 @@ export async function GET(request: Request) {
         return NextResponse.json({ error: 'Sport and League are required' }, { status: 400 })
     }
 
-    const apiSport = (sport === 'football' || sport === 'soccer') ? 'soccer' :
-        (sport === 'nfl' || sport === 'ncaaf' || sport === 'american-football') ? 'football' :
-            (sport === 'basketball' || sport === 'nba') ? 'basketball' :
-                sport
+    // Smarter normalization:
+    // 1. If sport is 'football' it could be soccer or american football based on league
+    // 2. If sport is explicitly 'nfl', 'ncaaf', it's definitely 'football'
+    // 3. 'soccer' is always 'soccer'
+    // 4. 'basketball' is always 'basketball'
+    const apiSport =
+        (sport === 'soccer' || (sport === 'football' && (league.includes('eng') || league.includes('esp') || league.includes('ita') || league.includes('ger') || league.includes('uefa')))) ? 'soccer' :
+            (sport === 'nfl' || sport === 'ncaaf' || sport === 'american-football' || (sport === 'football' && (league === 'nfl' || league === 'college-football'))) ? 'football' :
+                (sport === 'basketball' || sport === 'nba' || sport === 'mens-college-basketball') ? 'basketball' :
+                    sport
 
     const cacheKey = `league-advanced:${apiSport}:${league}`
     const cached = getCachedData<any>(cacheKey)
@@ -25,56 +30,13 @@ export async function GET(request: Request) {
     }
 
     try {
-        // 1. Fetch Standings (non-blocking - if it fails, we can still calculate stats)
-        let standings: Standings | null = null
-        try {
-            standings = await getStandings(apiSport, league)
-        } catch (standingsError: any) {
-            console.error('Failed to fetch standings, but continuing with stats calculation:', standingsError.message)
-            // We'll create a minimal standings object from team schedules instead
-        }
+        // 1. Fetch Standings
+        const standings = await getStandings(apiSport, league)
 
-        // If standings failed, we need to get team list another way
-        let entries: any[] = []
-        if (standings) {
-            entries = standings.groups && standings.groups.length > 0
-                ? standings.groups.flatMap((g: any) => g.entries)
-                : standings.entries || []
-        } else {
-            // Fallback: fetch teams from the teams endpoint
-            console.log(`[Advanced Stats] Standings failed, fetching teams from teams endpoint`)
-            const teamsUrl = `https://site.api.espn.com/apis/site/v2/sports/${apiSport}/${league}/teams`
-            console.log(`[Advanced Stats] Fetching teams from: ${teamsUrl}`)
-            const teamsResponse = await fetch(teamsUrl)
-            console.log(`[Advanced Stats] Teams response status: ${teamsResponse.status}`)
-
-            if (teamsResponse.ok) {
-                const teamsData = await teamsResponse.json()
-                console.log(`[Advanced Stats] Teams data keys:`, Object.keys(teamsData))
-                const teams = teamsData.sports?.[0]?.leagues?.[0]?.teams || []
-                console.log(`[Advanced Stats] Found ${teams.length} teams`)
-                entries = teams.map((t: any) => ({
-                    team: {
-                        id: t.team.id,
-                        uid: t.team.uid,
-                        location: t.team.location,
-                        name: t.team.name,
-                        abbreviation: t.team.abbreviation,
-                        displayName: t.team.displayName,
-                        shortDisplayName: t.team.shortDisplayName,
-                        logos: t.team.logos
-                    },
-                    stats: []
-                }))
-            } else {
-                const errorText = await teamsResponse.text()
-                console.error(`[Advanced Stats] Teams endpoint failed:`, errorText.substring(0, 500))
-            }
-        }
-
-        if (entries.length === 0) {
-            throw new Error('No teams found for this league')
-        }
+        // Robust flattening of entries from groups (NFL has conferences/divisions)
+        const entries = standings.groups && standings.groups.length > 0
+            ? standings.groups.flatMap((g: any) => g.entries || [])
+            : standings.entries || []
 
         // 2. Fetch Schedules and identify all unique completed matches for the season
         const teamMatchIds: Record<string, string[]> = {}
@@ -138,14 +100,7 @@ export async function GET(request: Request) {
         })
 
         const result = {
-            standings: standings || {
-                name: `${league.toUpperCase()} Standings`,
-                abbreviation: league.toUpperCase(),
-                season: new Date().getFullYear(),
-                seasonDisplayName: `${new Date().getFullYear()}`,
-                entries: entries,
-                groups: []
-            },
+            standings,
             advancedStats
         }
 
@@ -155,10 +110,6 @@ export async function GET(request: Request) {
         return NextResponse.json(result)
     } catch (error: any) {
         console.error('League advanced aggregation failed:', error)
-        console.error('Error stack:', error.stack)
-        return NextResponse.json({
-            error: error.message || 'Failed to aggregate data',
-            details: process.env.NODE_ENV === 'development' ? error.stack : undefined
-        }, { status: 500 })
+        return NextResponse.json({ error: error.message || 'Failed to aggregate data' }, { status: 500 })
     }
 }

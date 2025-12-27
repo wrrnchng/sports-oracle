@@ -10,7 +10,9 @@ import {
     AlertCircle,
     BarChart3,
     PieChart,
-    Activity
+    Activity,
+    ChevronUp,
+    ChevronDown
 } from 'lucide-react'
 import { StandingEntry, Standings } from '@/lib/types'
 import { calculateAdvancedStats, AdvancedStats, SoccerAdvancedStats, BasketballAllowedStats, NFLAllowedStats } from '@/lib/stats-utils'
@@ -32,8 +34,25 @@ export function LeagueDetailedBreakdown({ sport, league }: LeagueDetailedBreakdo
     const [error, setError] = useState<string | null>(null)
     const [selectedGroupIndex, setSelectedGroupIndex] = useState(0)
 
+    // Sorting State
+    const [sortKey, setSortKey] = useState<string>('rank')
+    const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc')
+
     // UI Tabs
     const [soccerTab, setSoccerTab] = useState<SoccerTab>('goals')
+
+    // Reset sort/tabs when sport/league changes
+    useEffect(() => {
+        setSortKey('rank')
+        setSortOrder('asc')
+        setSoccerTab('goals')
+    }, [sport, league])
+
+    // Reset sort when tab changes (optional, but cleaner)
+    useEffect(() => {
+        setSortKey('rank')
+        setSortOrder('asc')
+    }, [soccerTab])
 
     useEffect(() => {
         if (!league) return
@@ -78,13 +97,65 @@ export function LeagueDetailedBreakdown({ sport, league }: LeagueDetailedBreakdo
         setSelectedGroupIndex(0)
     }, [sport, league])
 
-    const activeEntries = useMemo(() => {
+    const sortedEntries = useMemo(() => {
         if (!standings) return []
-        if (standings.groups && standings.groups.length > 0) {
-            return standings.groups[selectedGroupIndex].entries
+        const entries = standings.groups && standings.groups.length > 0
+            ? [...standings.groups[selectedGroupIndex].entries]
+            : [...(standings.entries || [])]
+
+        if (sortKey === 'rank') {
+            return entries.sort((a, b) => {
+                const valA = a.stats?.find(s => s.name === 'rank' || s.type === 'rank')?.value ?? 999
+                const valB = b.stats?.find(s => s.name === 'rank' || s.type === 'rank')?.value ?? 999
+                return sortOrder === 'asc' ? Number(valA) - Number(valB) : Number(valB) - Number(valA)
+            })
         }
-        return standings.entries || []
-    }, [standings, selectedGroupIndex])
+
+        if (sortKey === 'team') {
+            return entries.sort((a, b) => {
+                const nameA = a.team.shortDisplayName.toLowerCase()
+                const nameB = b.team.shortDisplayName.toLowerCase()
+                return sortOrder === 'asc'
+                    ? nameA.localeCompare(nameB)
+                    : nameB.localeCompare(nameA)
+            })
+        }
+
+        const getNestedValue = (obj: any, path: string) => {
+            return path.split('.').reduce((acc, part) => acc && acc[part], obj)
+        }
+
+        return entries.sort((a, b) => {
+            const statsA = advancedStatsMap[a.team.id]
+            const statsB = advancedStatsMap[b.team.id]
+
+            if (!statsA && !statsB) return 0
+            if (!statsA) return 1
+            if (!statsB) return -1
+
+            const valA = sortKey === 'sample' ? statsA.sampleSize : getNestedValue(statsA, sortKey)
+            const valB = sortKey === 'sample' ? statsB.sampleSize : getNestedValue(statsB, sortKey)
+
+            const numA = Number(valA || 0)
+            const numB = Number(valB || 0)
+
+            return sortOrder === 'asc' ? numA - numB : numB - numA
+        })
+    }, [standings, selectedGroupIndex, sortKey, sortOrder, advancedStatsMap])
+
+    const handleSort = (key: string) => {
+        if (sortKey === key) {
+            setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')
+        } else {
+            setSortKey(key)
+            setSortOrder('desc') // Default to descending for stats
+        }
+    }
+
+    const SortIndicator = ({ columnKey }: { columnKey: string }) => {
+        if (sortKey !== columnKey) return null
+        return sortOrder === 'asc' ? <ChevronUp className="w-3 h-3 ml-1 inline" /> : <ChevronDown className="w-3 h-3 ml-1 inline" />
+    }
 
     if (error) {
         return (
@@ -167,67 +238,141 @@ export function LeagueDetailedBreakdown({ sport, league }: LeagueDetailedBreakdo
                 <table className="w-full text-sm border-collapse">
                     <thead>
                         <tr className="bg-zinc-950/30 text-zinc-400 border-b border-zinc-800">
-                            <th className="py-4 px-4 text-left font-semibold uppercase tracking-wider text-[10px] w-12 sticky left-0 bg-zinc-900/90 backdrop-blur z-10">#</th>
-                            <th className="py-4 px-4 text-left font-semibold uppercase tracking-wider text-[10px] sticky left-12 bg-zinc-900/90 backdrop-blur z-10">Team</th>
+                            <th
+                                onClick={() => handleSort('rank')}
+                                className="py-4 px-4 text-left font-semibold uppercase tracking-wider text-[10px] w-12 sticky left-0 bg-zinc-900/90 backdrop-blur z-10 cursor-pointer hover:text-white transition-colors"
+                            >
+                                # <SortIndicator columnKey="rank" />
+                            </th>
+                            <th
+                                onClick={() => handleSort('team')}
+                                className="py-4 px-4 text-left font-semibold uppercase tracking-wider text-[10px] sticky left-12 bg-zinc-900/90 backdrop-blur z-10 cursor-pointer hover:text-white transition-colors"
+                            >
+                                Team <SortIndicator columnKey="team" />
+                            </th>
 
                             {isSoccer ? (
                                 soccerTab === 'goals' ? (
                                     <>
-                                        <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] hover:text-zinc-100 transition-colors">Avg Goals</th>
-                                        <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] hover:text-zinc-100 transition-colors">O1.5 %</th>
-                                        <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] hover:text-zinc-100 transition-colors">O2.5 %</th>
-                                        <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] hover:text-zinc-100 transition-colors">BTTS %</th>
-                                        <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] hover:text-zinc-100 transition-colors">FTS %</th>
-                                        <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] hover:text-zinc-100 transition-colors text-emerald-500">CS %</th>
+                                        <th onClick={() => handleSort('soccer.fullTime.avgGoals')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                            Avg Goals <SortIndicator columnKey="soccer.fullTime.avgGoals" />
+                                        </th>
+                                        <th onClick={() => handleSort('soccer.fullTime.over15')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                            O1.5 % <SortIndicator columnKey="soccer.fullTime.over15" />
+                                        </th>
+                                        <th onClick={() => handleSort('soccer.fullTime.over25')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                            O2.5 % <SortIndicator columnKey="soccer.fullTime.over25" />
+                                        </th>
+                                        <th onClick={() => handleSort('soccer.fullTime.btts')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                            BTTS % <SortIndicator columnKey="soccer.fullTime.btts" />
+                                        </th>
+                                        <th onClick={() => handleSort('soccer.fullTime.failedToScore')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                            FTS % <SortIndicator columnKey="soccer.fullTime.failedToScore" />
+                                        </th>
+                                        <th onClick={() => handleSort('soccer.fullTime.cleanSheet')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors text-emerald-500">
+                                            CS % <SortIndicator columnKey="soccer.fullTime.cleanSheet" />
+                                        </th>
                                     </>
                                 ) : soccerTab === 'corners' ? (
                                     <>
-                                        <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px]">Avg Total</th>
-                                        <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px]">Avg Team</th>
-                                        <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px]">Avg Opp</th>
-                                        <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px]">O8.5 %</th>
-                                        <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px]">O9.5 %</th>
-                                        <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px]">O10.5 %</th>
+                                        <th onClick={() => handleSort('soccer.fullTime.corners.total')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                            Avg Total <SortIndicator columnKey="soccer.fullTime.corners.total" />
+                                        </th>
+                                        <th onClick={() => handleSort('soccer.fullTime.corners.us')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                            Avg Team <SortIndicator columnKey="soccer.fullTime.corners.us" />
+                                        </th>
+                                        <th onClick={() => handleSort('soccer.fullTime.corners.them')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                            Avg Opp <SortIndicator columnKey="soccer.fullTime.corners.them" />
+                                        </th>
+                                        <th onClick={() => handleSort('soccer.fullTime.corners.over8')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                            O8.5 % <SortIndicator columnKey="soccer.fullTime.corners.over8" />
+                                        </th>
+                                        <th onClick={() => handleSort('soccer.fullTime.corners.over9')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                            O9.5 % <SortIndicator columnKey="soccer.fullTime.corners.over9" />
+                                        </th>
+                                        <th onClick={() => handleSort('soccer.fullTime.corners.over10')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                            O10.5 % <SortIndicator columnKey="soccer.fullTime.corners.over10" />
+                                        </th>
                                     </>
                                 ) : (
                                     <>
-                                        <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px]">HT O0.5 %</th>
-                                        <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px]">HT O1.5 %</th>
-                                        <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px]">SH O0.5 %</th>
-                                        <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px]">SH O1.5 %</th>
-                                        <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px]">HT BTTS %</th>
+                                        <th onClick={() => handleSort('soccer.halfTime.over05')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                            HT O0.5 % <SortIndicator columnKey="soccer.halfTime.over05" />
+                                        </th>
+                                        <th onClick={() => handleSort('soccer.halfTime.over15')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                            HT O1.5 % <SortIndicator columnKey="soccer.halfTime.over15" />
+                                        </th>
+                                        <th onClick={() => handleSort('soccer.secondHalf.over05')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                            SH O0.5 % <SortIndicator columnKey="soccer.secondHalf.over05" />
+                                        </th>
+                                        <th onClick={() => handleSort('soccer.secondHalf.over15')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                            SH O1.5 % <SortIndicator columnKey="soccer.secondHalf.over15" />
+                                        </th>
+                                        <th onClick={() => handleSort('soccer.halfTime.btts')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                            HT BTTS % <SortIndicator columnKey="soccer.halfTime.btts" />
+                                        </th>
                                     </>
                                 )
                             ) : isBasketball ? (
                                 <>
-                                    <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] text-red-400">Pts Allowed</th>
-                                    <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px]">Reb Allowed</th>
-                                    <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px]">Ast Allowed</th>
-                                    <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px]">Stl Allowed</th>
-                                    <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px]">Blk Allowed</th>
-                                    <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px]">3PM Allowed</th>
+                                    <th onClick={() => handleSort('basketball.points')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] text-red-400 cursor-pointer hover:text-white transition-colors">
+                                        Pts Allowed <SortIndicator columnKey="basketball.points" />
+                                    </th>
+                                    <th onClick={() => handleSort('basketball.rebounds')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                        Reb Allowed <SortIndicator columnKey="basketball.rebounds" />
+                                    </th>
+                                    <th onClick={() => handleSort('basketball.assists')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                        Ast Allowed <SortIndicator columnKey="basketball.assists" />
+                                    </th>
+                                    <th onClick={() => handleSort('basketball.steals')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                        Stl Allowed <SortIndicator columnKey="basketball.steals" />
+                                    </th>
+                                    <th onClick={() => handleSort('basketball.blocks')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                        Blk Allowed <SortIndicator columnKey="basketball.blocks" />
+                                    </th>
+                                    <th onClick={() => handleSort('basketball.threePointsMade')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                        3PM Allowed <SortIndicator columnKey="basketball.threePointsMade" />
+                                    </th>
                                 </>
                             ) : (
                                 <>
-                                    <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] text-red-500">Yards Allowed</th>
-                                    <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px]">Pass Yards</th>
-                                    <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px]">Rush Yards</th>
-                                    <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px]">TDs Allowed</th>
-                                    <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px]">Int Forced</th>
+                                    <th onClick={() => handleSort('nfl.yards.total')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] text-red-500 cursor-pointer hover:text-white transition-colors">
+                                        Yards Allowed <SortIndicator columnKey="nfl.yards.total" />
+                                    </th>
+                                    <th onClick={() => handleSort('nfl.yards.passing')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                        Pass Yards <SortIndicator columnKey="nfl.yards.passing" />
+                                    </th>
+                                    <th onClick={() => handleSort('nfl.yards.rushing')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                        Rush Yards <SortIndicator columnKey="nfl.yards.rushing" />
+                                    </th>
+                                    <th onClick={() => handleSort('nfl.touchdowns')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                        TDs Allowed <SortIndicator columnKey="nfl.touchdowns" />
+                                    </th>
+                                    <th onClick={() => handleSort('nfl.interceptions')} className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors">
+                                        Int Forced <SortIndicator columnKey="nfl.interceptions" />
+                                    </th>
                                 </>
                             )}
-                            <th className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px]">Sample</th>
+                            <th
+                                onClick={() => handleSort('sample')}
+                                className="py-4 px-4 text-center font-semibold uppercase tracking-wider text-[10px] cursor-pointer hover:text-white transition-colors"
+                            >
+                                Sample <SortIndicator columnKey="sample" />
+                            </th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-800/50">
-                        {activeEntries.map((entry, idx) => {
+                        {sortedEntries.map((entry, idx) => {
                             const stats = advancedStatsMap[entry.team.id]
                             const isDataLoading = !stats && loading
+
+                            const rankValue = entry.stats?.find(s => s.name === 'rank' || s.type === 'rank')?.value ?? (idx + 1)
+
 
                             return (
                                 <tr key={entry.team.id} className="hover:bg-zinc-800/10 transition-colors group">
                                     <td className="py-4 px-4 sticky left-0 bg-zinc-900/90 backdrop-blur z-10 border-r border-zinc-800/50">
-                                        <span className="text-zinc-500 font-mono text-[10px]">{idx + 1}</span>
+                                        <span className="text-zinc-500 font-mono text-[10px]">{rankValue}</span>
                                     </td>
                                     <td className="py-4 px-4 sticky left-12 bg-zinc-900/90 backdrop-blur z-10 border-r border-zinc-800/50">
                                         <div className="flex items-center gap-3">

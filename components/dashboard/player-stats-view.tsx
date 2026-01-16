@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
-import { ChevronRight, Calendar, User, TrendingUp, BarChart3, Loader2, RefreshCw, Search } from 'lucide-react'
+import React, { useState, useEffect, useMemo } from 'react'
+import { ChevronRight, Calendar, User, TrendingUp, BarChart3, Loader2, RefreshCw, Search, BarChart2 } from 'lucide-react'
 import { useRoster } from '@/hooks/use-roster'
 import { usePlayerLog } from '@/hooks/use-player-log'
 import { formatInManila } from '@/lib/types'
 import { cn } from '@/lib/utils'
+import { extractBasketballQuarterlyStats } from '@/lib/stats-utils'
 import {
     LineChart,
     Line,
@@ -42,6 +43,10 @@ export function PlayerStatsView({ sport }: PlayerStatsViewProps) {
     const [teams, setTeams] = useState<any[]>([])
     const [selectedTeam, setSelectedTeam] = useState<string>('')
     const [selectedPlayer, setSelectedPlayer] = useState<string>('')
+    const [gameSummaries, setGameSummaries] = useState<Record<string, any>>({})
+    const [loadingSummary, setLoadingSummary] = useState<string | null>(null)
+    const [selectedQuarter, setSelectedQuarter] = useState<string>('Full')
+    const [isFetchingSummaries, setIsFetchingSummaries] = useState(false)
     const [pendingPlayerId, setPendingPlayerId] = useState<string>('')
     const [loadingTeams, setLoadingTeams] = useState(false)
     const [searchTerm, setSearchTerm] = useState('')
@@ -110,10 +115,11 @@ export function PlayerStatsView({ sport }: PlayerStatsViewProps) {
         teamId: selectedTeam
     })
 
-    const { data: gamelog, isLoading: loadingLog } = usePlayerLog({
-        sport: apiSport,
-        league: league,
-        athleteId: selectedPlayer
+    const { data: gamelog, isLoading: isLoadingLog, refetch: refetchLog } = usePlayerLog({
+        sport,
+        league,
+        athleteId: selectedPlayer,
+        teamId: selectedTeam
     })
 
     // Process Roster
@@ -190,7 +196,7 @@ export function PlayerStatsView({ sport }: PlayerStatsViewProps) {
             const meta = eventsMetadata[event.eventId] || {}
             const row: any = {
                 id: event.eventId,
-                date: meta.gameDate || event.gameDate,
+                date: meta.gameDate || event.gameDate || '',
                 opponent: meta.opponent?.displayName || meta.game?.opponent?.displayName || 'Unknown',
                 opponentLogo: meta.opponent?.logo || meta.game?.opponent?.logo,
                 result: meta.gameResult || meta.game?.result || '-',
@@ -240,6 +246,49 @@ export function PlayerStatsView({ sport }: PlayerStatsViewProps) {
             return row
         }).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 10)
     }, [gamelog, sport])
+
+    // Batch fetch summaries when a quarter is selected
+    useEffect(() => {
+        if (selectedQuarter === 'Full' || !processedStats.length) return
+
+        const fetchAllMissing = async () => {
+            setIsFetchingSummaries(true)
+            const missingIds = processedStats
+                .map(g => g.id)
+                .filter(id => !gameSummaries[id])
+
+            if (missingIds.length === 0) {
+                setIsFetchingSummaries(false)
+                return
+            }
+
+            try {
+                const apiSport = sport === 'football' ? 'soccer' : (sport === 'nfl' || sport === 'ncaaf') ? 'football' : sport
+                // Use the existing batch endpoint if it exists, or individual fetches
+                // For now, individual parallel fetches for simplicity
+                await Promise.all(missingIds.map(async (id) => {
+                    const res = await fetch(`/api/summary?sport=${apiSport}&league=${league}&event=${id}&teamId=${selectedTeam}`)
+                    const data = await res.json()
+                    setGameSummaries(prev => ({ ...prev, [id]: data }))
+                }))
+            } catch (e) {
+                console.error("Failed to fetch batch summaries", e)
+            } finally {
+                setIsFetchingSummaries(false)
+            }
+        }
+
+        fetchAllMissing()
+    }, [selectedQuarter, processedStats, league, sport, selectedTeam])
+
+    const quarterOptions = [
+        { id: 'Full', label: 'Full Game' },
+        { id: '1', label: 'Q1' },
+        { id: '2', label: 'Q2' },
+        { id: '3', label: 'Q3' },
+        { id: '4', label: 'Q4' },
+        { id: '5', label: 'OT' }
+    ]
 
     const playerDetails = useMemo(() => {
         if (!roster || !selectedPlayer) return null
@@ -438,10 +487,30 @@ export function PlayerStatsView({ sport }: PlayerStatsViewProps) {
                                 </div>
 
                                 <div className="flex-1 overflow-y-auto p-6 scrollbar-thin">
-                                    {loadingLog ? (
-                                        <div className="h-full flex items-center justify-center"><Loader2 className="animate-spin w-8 h-8 text-zinc-600" /></div>
+                                    {isLoadingLog || isFetchingSummaries ? (
+                                        <div className="h-full flex flex-col items-center justify-center gap-4">
+                                            <Loader2 className="animate-spin w-8 h-8 text-blue-500" />
+                                            <p className="text-zinc-500 text-sm">{isFetchingSummaries ? 'Fetching Quarterly Stats...' : 'Loading Player Logs...'}</p>
+                                        </div>
                                     ) : processedStats.length > 0 ? (
                                         <div className="space-y-8">
+                                            {/* Quarter Selector */}
+                                            {sport === 'basketball' && (
+                                                <div className="flex items-center gap-2 bg-zinc-950 p-1 rounded-lg border border-zinc-800 w-fit">
+                                                    {quarterOptions.map(opt => (
+                                                        <button
+                                                            key={opt.id}
+                                                            onClick={() => setSelectedQuarter(opt.id)}
+                                                            className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${selectedQuarter === opt.id
+                                                                ? 'bg-blue-600 text-white shadow-lg'
+                                                                : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+                                                                }`}
+                                                        >
+                                                            {opt.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
                                             {sport === 'basketball' && (
                                                 <div className="h-72 w-full bg-zinc-900/50 p-6 rounded-xl border border-zinc-800/50 flex flex-col">
                                                     <h3 className="text-xs font-bold text-zinc-500 mb-6 flex items-center gap-2 shrink-0">
@@ -514,39 +583,85 @@ export function PlayerStatsView({ sport }: PlayerStatsViewProps) {
                                                             </tr>
                                                         </thead>
                                                         <tbody className="divide-y divide-zinc-800 bg-zinc-900/20">
-                                                            {processedStats.map((game: any) => (
-                                                                <tr key={game.id} className="hover:bg-zinc-800/50 transition-colors">
-                                                                    <td className="px-4 py-3 font-mono text-zinc-500 whitespace-nowrap">{formatInManila(new Date(game.date), 'MMM d')}</td>
-                                                                    <td className="px-4 py-3 text-zinc-300">{game.opponent?.displayName || game.opponent}</td>
-                                                                    {sport === 'basketball' && (
-                                                                        <>
-                                                                            <td className="px-2 py-3 text-left font-mono text-zinc-500">{game.MIN}</td>
-                                                                            <td className="px-2 py-3 text-right font-bold text-white">{game.PTS}</td>
-                                                                            <td className="px-2 py-3 text-right">{game.REB}</td>
-                                                                            <td className="px-2 py-3 text-right">{game.AST}</td>
-                                                                            <td className="px-2 py-3 text-right text-zinc-500">{game.STL}</td>
-                                                                            <td className="px-2 py-3 text-right text-zinc-500">{game.BLK}</td>
-                                                                            <td className="px-2 py-3 text-right">{game['3PM']}</td>
-                                                                            <td className="px-2 py-3 text-right font-bold text-indigo-400">{game.PRA}</td>
-                                                                        </>
-                                                                    )}
-                                                                    {sport === 'football' && (
-                                                                        <>
-                                                                            <td className="px-2 py-3 text-right">{game.G || '-'}</td>
-                                                                            <td className="px-2 py-3 text-right">{game.A || '-'}</td>
-                                                                            <td className="px-2 py-3 text-right">{game.SH || '-'}</td>
-                                                                        </>
-                                                                    )}
-                                                                    {(sport === 'nfl' || sport === 'ncaaf') && (
-                                                                        <>
-                                                                            <td className="px-2 py-3 text-right">{game.PASS_YDS}</td>
-                                                                            <td className="px-2 py-3 text-right">{game.RUSH_YDS}</td>
-                                                                            <td className="px-2 py-3 text-right">{game.REC_YDS}</td>
-                                                                            <td className="px-2 py-3 text-right font-bold text-white">{game.TD}</td>
-                                                                        </>
-                                                                    )}
-                                                                </tr>
-                                                            ))}
+                                                            {processedStats.map((game: any) => {
+                                                                const isExpanded = false // No more expanded rows
+
+                                                                // Extract quarterly stats if needed
+                                                                let displayStats = game
+                                                                if (sport === 'basketball' && selectedQuarter !== 'Full') {
+                                                                    const summary = gameSummaries[game.id]
+                                                                    if (summary) {
+                                                                        const qStats = extractBasketballQuarterlyStats(summary)
+                                                                        const playerQ = qStats.playerStats[selectedPlayer]?.[parseInt(selectedQuarter)]
+                                                                        if (playerQ) {
+                                                                            displayStats = {
+                                                                                ...game,
+                                                                                MIN: playerQ.min || '-',
+                                                                                PTS: playerQ.pts,
+                                                                                REB: playerQ.reb,
+                                                                                AST: playerQ.ast,
+                                                                                STL: playerQ.stl,
+                                                                                BLK: playerQ.blk,
+                                                                                '3PM': playerQ.threePM,
+                                                                                PRA: playerQ.pra
+                                                                            }
+                                                                        } else {
+                                                                            // DNP in this quarter
+                                                                            displayStats = {
+                                                                                ...game,
+                                                                                MIN: '-', PTS: 0, REB: 0, AST: 0, STL: 0, BLK: 0, '3PM': 0, PRA: 0
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+
+                                                                return (
+                                                                    <React.Fragment key={game.id}>
+                                                                        <tr
+                                                                            className={`border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors group`}
+                                                                        >
+                                                                            <td className="px-4 py-3 font-mono text-zinc-500 whitespace-nowrap">
+                                                                                {game.date ? formatInManila(game.date, 'MMM d') : '-'}
+                                                                            </td>
+                                                                            <td className="px-4 py-3 text-zinc-300">
+                                                                                <div className="flex items-center gap-2">
+                                                                                    {game.opponentLogo && (
+                                                                                        <img src={game.opponentLogo} alt="" className="w-5 h-5 object-contain" />
+                                                                                    )}
+                                                                                    {game.opponent?.displayName || game.opponent}
+                                                                                </div>
+                                                                            </td>
+                                                                            {sport === 'basketball' && (
+                                                                                <>
+                                                                                    <td className="px-2 py-3 text-left font-mono text-zinc-500">{displayStats.MIN}</td>
+                                                                                    <td className="px-2 py-3 text-right font-bold text-white">{displayStats.PTS}</td>
+                                                                                    <td className="px-2 py-3 text-right">{displayStats.REB}</td>
+                                                                                    <td className="px-2 py-3 text-right">{displayStats.AST}</td>
+                                                                                    <td className="px-2 py-3 text-right text-zinc-500">{displayStats.STL}</td>
+                                                                                    <td className="px-2 py-3 text-right text-zinc-500">{displayStats.BLK}</td>
+                                                                                    <td className="px-2 py-3 text-right">{displayStats['3PM']}</td>
+                                                                                    <td className="px-2 py-3 text-right font-bold text-indigo-400">{displayStats.PRA}</td>
+                                                                                </>
+                                                                            )}
+                                                                            {sport === 'football' && (
+                                                                                <>
+                                                                                    <td className="px-2 py-3 text-right">{game.G || '-'}</td>
+                                                                                    <td className="px-2 py-3 text-right">{game.A || '-'}</td>
+                                                                                    <td className="px-2 py-3 text-right">{game.SH || '-'}</td>
+                                                                                </>
+                                                                            )}
+                                                                            {(sport === 'nfl' || sport === 'ncaaf') && (
+                                                                                <>
+                                                                                    <td className="px-2 py-3 text-right">{game.PASS_YDS}</td>
+                                                                                    <td className="px-2 py-3 text-right">{game.RUSH_YDS}</td>
+                                                                                    <td className="px-2 py-3 text-right">{game.REC_YDS}</td>
+                                                                                    <td className="px-2 py-3 text-right font-bold text-white">{game.TD}</td>
+                                                                                </>
+                                                                            )}
+                                                                        </tr>
+                                                                    </React.Fragment>
+                                                                )
+                                                            })}
                                                         </tbody>
                                                     </table>
                                                 </div>

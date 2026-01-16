@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import { format } from 'date-fns'
-import { X, Loader2, Trophy, Clock, AlertTriangle, MapPin, ChevronLeft, ChevronRight } from 'lucide-react'
+import { X, Loader2, Trophy, Clock, AlertTriangle, MapPin, ChevronLeft, ChevronRight, BarChart2 } from 'lucide-react'
 import { GameSummary } from '@/lib/types'
+import { extractBasketballQuarterlyStats } from '@/lib/stats-utils'
 
 interface MatchStatsCardProps {
     isOpen: boolean
@@ -192,6 +193,9 @@ export function MatchStatsCard({
         // Linescore (Points by period)
         const periods = homeComp?.linescores?.map((_, i) => i + 1) || [1, 2, 3, 4]
 
+        // Quarterly Stats
+        const quarterlyData = extractBasketballQuarterlyStats(summary)
+
         return (
             <div className="space-y-6">
                 {/* Linescore Table */}
@@ -221,6 +225,47 @@ export function MatchStatsCard({
                             </tr>
                         </tbody>
                     </table>
+                </div>
+
+                {/* Quarterly Breakdown Table (New) */}
+                <div className="space-y-3">
+                    <h4 className="text-xs font-bold text-zinc-500 flex items-center gap-2 uppercase tracking-widest px-1">
+                        <BarChart2 className="w-3.5 h-3.5 text-indigo-500" />
+                        Quarterly Breakdown
+                    </h4>
+                    <div className="overflow-x-auto bg-zinc-900/10 rounded-lg border border-zinc-800/40">
+                        <table className="w-full text-[11px] border-collapse">
+                            <thead>
+                                <tr className="bg-zinc-900/40 text-zinc-500 uppercase font-bold">
+                                    <th className="py-2.5 px-3 text-left w-20">Period</th>
+                                    <th className="py-2.5 px-3 text-center border-l border-zinc-800/50" colSpan={3}>{homeComp?.team?.abbreviation}</th>
+                                    <th className="py-2.5 px-3 text-center border-l border-zinc-800/50" colSpan={3}>{awayComp?.team?.abbreviation}</th>
+                                </tr>
+                                <tr className="text-zinc-600 border-b border-zinc-800/50 font-mono">
+                                    <th className="py-1 px-3"></th>
+                                    <th className="py-1 px-2 text-center border-l border-zinc-800/50">PTS</th>
+                                    <th className="py-1 px-2 text-center">REB</th>
+                                    <th className="py-1 px-2 text-center">AST</th>
+                                    <th className="py-1 px-2 text-center border-l border-zinc-800/50">PTS</th>
+                                    <th className="py-1 px-2 text-center">REB</th>
+                                    <th className="py-1 px-2 text-center">AST</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {quarterlyData.quarters.map((q) => (
+                                    <tr key={q.period} className="border-b border-zinc-800/30 hover:bg-zinc-800/20 transition-colors">
+                                        <td className="py-2 px-3 font-bold text-zinc-400">{q.label}</td>
+                                        <td className="py-2 px-2 text-center border-l border-zinc-800/50 font-mono text-zinc-100">{q.home.pts}</td>
+                                        <td className="py-2 px-2 text-center font-mono text-zinc-400">{q.home.reb}</td>
+                                        <td className="py-2 px-2 text-center font-mono text-zinc-400">{q.home.ast}</td>
+                                        <td className="py-2 px-2 text-center border-l border-zinc-800/50 font-mono text-zinc-100">{q.away.pts}</td>
+                                        <td className="py-2 px-2 text-center font-mono text-zinc-400">{q.away.reb}</td>
+                                        <td className="py-2 px-2 text-center font-mono text-zinc-400">{q.away.ast}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
 
                 {/* Tabs */}

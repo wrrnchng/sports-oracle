@@ -157,6 +157,147 @@ export function calculateTeamStats(events: any[], teamId: string, sport: string,
     }
 }
 
+
+
+export interface PlayerQuarterlyStats {
+    pts: number
+    reb: number
+    ast: number
+    stl: number
+    blk: number
+    threePM: number
+    min: number
+    pra: number
+}
+
+export interface BasketballQuarterlyBreakdown {
+    period: number
+    label: string
+    home: { pts: number, reb: number, ast: number }
+    away: { pts: number, reb: number, ast: number }
+}
+
+export interface BasketballQuarterlyResponse {
+    quarters: BasketballQuarterlyBreakdown[]
+    playerStats: Record<string, Record<number, PlayerQuarterlyStats>> // playerId -> period -> stats
+}
+
+export function extractBasketballQuarterlyStats(summary: any): BasketballQuarterlyResponse {
+    const quarters: BasketballQuarterlyBreakdown[] = []
+    const playerStats: Record<string, Record<number, PlayerQuarterlyStats>> = {}
+
+    const homeComp = summary.header?.competitions?.[0]?.competitors?.find((c: any) => c.homeAway === 'home')
+    const awayComp = summary.header?.competitions?.[0]?.competitors?.find((c: any) => c.homeAway === 'away')
+    const homeId = homeComp?.id
+    const awayId = awayComp?.id
+
+    if (!homeComp || !awayComp) return { quarters: [], playerStats: {} }
+
+    // Helper for init player
+    const initPlayer = (id: string, period: number) => {
+        if (!playerStats[id]) playerStats[id] = {}
+        if (!playerStats[id][period]) {
+            playerStats[id][period] = { pts: 0, reb: 0, ast: 0, stl: 0, blk: 0, threePM: 0, min: 0, pra: 0 }
+        }
+    }
+
+    // 1. Get Points per Quarter from linescores
+    const maxPeriods = Math.max(homeComp.linescores?.length || 0, awayComp.linescores?.length || 0)
+    for (let i = 0; i < maxPeriods; i++) {
+        const hLine = homeComp.linescores?.[i]
+        const aLine = awayComp.linescores?.[i]
+        const periodNum = hLine?.period || aLine?.period || (i + 1)
+
+        quarters.push({
+            period: periodNum,
+            label: periodNum <= 4 ? `Q${periodNum}` : `OT${periodNum - 4}`,
+            home: { pts: parseInt(hLine?.displayValue || hLine?.value || '0'), reb: 0, ast: 0 },
+            away: { pts: parseInt(aLine?.displayValue || aLine?.value || '0'), reb: 0, ast: 0 }
+        })
+    }
+
+    // 2. Aggregate from Plays
+    const plays = summary.plays || []
+
+    // Track active players for MIN calculation (highly simplified)
+    // We assume starters play full Q1 unless subbed.
+    // In practice, play-by-play MIN is very hard, let's focus on Boxscore stats first if possible.
+    // But since Boxscore is usually Full Game, we stick to play-by-play aggregation.
+
+    plays.forEach((play: any) => {
+        const period = play.period?.number
+        if (!period) return
+
+        const qIdx = quarters.findIndex(q => q.period === period)
+        if (qIdx === -1) return
+
+        const isHome = play.team?.id === homeId
+        const isAway = play.team?.id === awayId
+        const targetTeam = isHome ? quarters[qIdx].home : isAway ? quarters[qIdx].away : null
+
+        const playText = (play.text || '').toLowerCase()
+        const playType = (play.type?.text || '').toLowerCase()
+
+        const isRebound = playType.includes('rebound')
+        const isAssist = playText.includes('assists')
+        const isSteal = playText.includes('steals')
+        const isBlock = playText.includes('blocks')
+        const isScore = play.scoringPlay || play.scoreValue > 0
+
+        // Team Stats
+        if (targetTeam) {
+            if (isRebound) targetTeam.reb++
+            if (isAssist) targetTeam.ast++
+        }
+
+        // Player Stats
+        if (play.participants) {
+            play.participants.forEach((p: any, idx: number) => {
+                const athleteId = p.athlete?.id
+                if (!athleteId) return
+                initPlayer(athleteId, period)
+
+                // Pts & 3PM
+                if (isScore && idx === 0) {
+                    const pts = play.scoreValue || 0
+                    playerStats[athleteId][period].pts += pts
+                    if (pts === 3) playerStats[athleteId][period].threePM++
+                }
+
+                // Ast (Usually participant[1] in assist plays)
+                if (isAssist && idx === 1) {
+                    playerStats[athleteId][period].ast++
+                }
+
+                // Reb (Usually participant[0] in rebound plays)
+                if (isRebound && idx === 0) {
+                    playerStats[athleteId][period].reb++
+                }
+
+                // Stl: "Player A blocks Player B 's ... shot" (idx 1 is defender)
+                // Or "Player A steals the ball from Player B"
+                if (isSteal && idx === 1) {
+                    playerStats[athleteId][period].stl++
+                }
+
+                // Blk: "Player A blocks B 's shot" (idx 1 is defender)
+                if (isBlock && idx === 1) {
+                    playerStats[athleteId][period].blk++
+                }
+            })
+        }
+    })
+
+    // Calculate PRA post-aggregation
+    Object.values(playerStats).forEach(periods => {
+        Object.values(periods).forEach(s => {
+            s.pra = s.pts + s.reb + s.ast
+        })
+    })
+
+    return { quarters, playerStats }
+}
+
 // --- Advanced Stats Interfaces ---
 
 export interface SoccerPeriodBreakdown {

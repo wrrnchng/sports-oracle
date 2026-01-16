@@ -5,6 +5,7 @@ interface UsePlayerLogOptions {
     sport: string
     league: string
     athleteId?: string
+    teamId?: string
 }
 
 interface UsePlayerLogReturn {
@@ -14,7 +15,7 @@ interface UsePlayerLogReturn {
     refetch: () => Promise<void>
 }
 
-export function usePlayerLog({ sport, league, athleteId }: UsePlayerLogOptions): UsePlayerLogReturn {
+export function usePlayerLog({ sport, league, athleteId, teamId }: UsePlayerLogOptions): UsePlayerLogReturn {
     const [data, setData] = useState<PlayerGameLog | null>(null)
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<Error | null>(null)
@@ -34,6 +35,7 @@ export function usePlayerLog({ sport, league, athleteId }: UsePlayerLogOptions):
             abortControllerRef.current = new AbortController()
 
             const params = new URLSearchParams({ sport, league, athleteId })
+            if (teamId) params.append('teamId', teamId)
             const response = await fetch(`/api/player/log?${params.toString()}`, {
                 signal: abortControllerRef.current.signal
             })
@@ -55,7 +57,7 @@ export function usePlayerLog({ sport, league, athleteId }: UsePlayerLogOptions):
         return () => {
             if (abortControllerRef.current) abortControllerRef.current.abort()
         }
-    }, [sport, league, athleteId])
+    }, [sport, league, athleteId, teamId])
 
     return { data, isLoading, error, refetch: fetchData }
 }

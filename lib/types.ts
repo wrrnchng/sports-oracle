@@ -244,12 +244,23 @@ export interface GameSummary {
                 score: string,
                 homeAway: string,
                 winner?: boolean,
-                linescores?: Array<{ value: number, displayValue: string }>,
+                linescores?: Array<{ value: number, displayValue: string, period: number }>,
                 record?: Array<{ summary: string, type: string }>
             }>
             status: { type: { state: string, completed: boolean, detail: string, name: string } }
         }>
     }
+    plays?: Array<{
+        id: string
+        type: { id: string, text: string }
+        text: string
+        awayScore: number
+        homeScore: number
+        period: { number: number, displayValue: string }
+        clock: { displayValue: string }
+        team?: { id: string }
+        participants?: Array<{ athlete: { id: string } }>
+    }>
     scoringPlays?: Array<{
         text: string
         type: { text: string }
@@ -289,7 +300,10 @@ export function formatDateForAPI(date: Date): string {
  * Format date for display in Manila time
  */
 export function formatInManila(date: string | Date, formatStr: string): string {
-    return formatInTimeZone(new Date(date), MANILA_TIMEZONE, formatStr)
+    if (!date) return '-'
+    const d = new Date(date)
+    if (isNaN(d.getTime())) return '-'
+    return formatInTimeZone(d, MANILA_TIMEZONE, formatStr)
 }
 
 // ============================================================================

@@ -6,10 +6,10 @@ import { Trophy, Target, Shield, Zap, Flag } from 'lucide-react'
 
 interface SoccerStatBreakdownProps {
     team1: { name: string, stats: SoccerPeriodBreakdown }
-    team2: { name: string, stats: SoccerPeriodBreakdown }
-    fullTime: { t1: SoccerPeriodBreakdown, t2: SoccerPeriodBreakdown }
-    halfTime: { t1: SoccerPeriodBreakdown, t2: SoccerPeriodBreakdown }
-    secondHalf: { t1: SoccerPeriodBreakdown, t2: SoccerPeriodBreakdown }
+    team2?: { name: string, stats?: SoccerPeriodBreakdown }
+    fullTime: { t1: SoccerPeriodBreakdown, t2?: SoccerPeriodBreakdown }
+    halfTime: { t1: SoccerPeriodBreakdown, t2?: SoccerPeriodBreakdown }
+    secondHalf: { t1: SoccerPeriodBreakdown, t2?: SoccerPeriodBreakdown }
 }
 
 export function SoccerStatBreakdown({ team1, team2, fullTime, halfTime, secondHalf }: SoccerStatBreakdownProps) {
@@ -37,25 +37,25 @@ export function SoccerStatBreakdown({ team1, team2, fullTime, halfTime, secondHa
                     title="Goals Scored"
                     icon={<Target className="w-4 h-4 text-emerald-400" />}
                     team1Name={team1.name}
-                    team2Name={team2.name}
+                    team2Name={team2?.name}
                     rows={[
                         { label: 'Scored Over 0.5', key: 'failedToScore', isInverse: true },
                         { label: 'Scored Over 1.5', key: 'teamOver15' },
                         { label: 'Average Goals', key: 'avgGoals', isRaw: true },
                     ]}
-                    data={current}
+                    data={{ t1: current.t1, t2: current.t2 }}
                 />
 
                 <StatGroup
                     title="Goals Conceded"
                     icon={<Shield className="w-4 h-4 text-rose-400" />}
                     team1Name={team1.name}
-                    team2Name={team2.name}
+                    team2Name={team2?.name}
                     rows={[
                         { label: 'Clean Sheet', key: 'cleanSheet' },
                         { label: 'Conceded Over 1.5', key: 'oppOver15' },
                     ]}
-                    data={current}
+                    data={{ t1: current.t1, t2: current.t2 }}
                     isOpponentRow={true}
                 />
 
@@ -63,7 +63,7 @@ export function SoccerStatBreakdown({ team1, team2, fullTime, halfTime, secondHa
                     title="Over 2.5 & BTTS"
                     icon={<Zap className="w-4 h-4 text-amber-400" />}
                     team1Name={team1.name}
-                    team2Name={team2.name}
+                    team2Name={team2?.name}
                     rows={[
                         { label: 'Over 2.5 Goals', key: 'over25' },
                         { label: 'BTTS (Both Teams Score)', key: 'btts' },
@@ -71,14 +71,14 @@ export function SoccerStatBreakdown({ team1, team2, fullTime, halfTime, secondHa
                         { label: 'BTTS & No Over 2.5', key: 'bttsNoOver25' },
                         { label: 'BTTS & Win', key: 'bttsWin' },
                     ]}
-                    data={current}
+                    data={{ t1: current.t1, t2: current.t2 }}
                 />
 
                 <StatGroup
                     title="Match Corners"
                     icon={<Flag className="w-4 h-4 text-blue-400" />}
                     team1Name={team1.name}
-                    team2Name={team2.name}
+                    team2Name={team2?.name}
                     rows={[
                         { label: 'Corner Kicks (Avg)', key: 'corners.total', isRaw: true },
                         { label: 'Over 8.5 Corners', key: 'corners.over8' },
@@ -86,14 +86,14 @@ export function SoccerStatBreakdown({ team1, team2, fullTime, halfTime, secondHa
                         { label: 'Over 10.5 Corners', key: 'corners.over10' },
                         { label: 'Over 11.5 Corners', key: 'corners.over11' },
                     ]}
-                    data={current}
+                    data={{ t1: current.t1, t2: current.t2 }}
                 />
 
                 <StatGroup
                     title="Team Corners"
                     icon={<Flag className="w-4 h-4 text-indigo-400" />}
                     team1Name={team1.name}
-                    team2Name={team2.name}
+                    team2Name={team2?.name}
                     rows={[
                         { label: 'Corners Earned (Avg)', key: 'corners.us', isRaw: true },
                         { label: 'Corners Against (Avg)', key: 'corners.them', isRaw: true },
@@ -101,14 +101,22 @@ export function SoccerStatBreakdown({ team1, team2, fullTime, halfTime, secondHa
                         { label: 'Over 4.5 Team Cnr', key: 'corners.teamOver45' },
                         { label: 'Over 3.5 Opp Cnr', key: 'corners.oppOver35' },
                     ]}
-                    data={current}
+                    data={{ t1: current.t1, t2: current.t2 }}
                 />
             </div>
         </div>
     )
 }
 
-function StatGroup({ title, icon, team1Name, team2Name, rows, data, isOpponentRow }: { title: string, icon: React.ReactNode, team1Name: string, team2Name: string, rows: any[], data: { t1: any, t2: any }, isOpponentRow?: boolean }) {
+function StatGroup({ title, icon, team1Name, team2Name, rows, data, isOpponentRow }: {
+    title: string,
+    icon: React.ReactNode,
+    team1Name: string,
+    team2Name?: string,
+    rows: any[],
+    data: { t1: any, t2?: any },
+    isOpponentRow?: boolean
+}) {
     return (
         <div className="bg-zinc-900/50 rounded-2xl border border-zinc-800 overflow-hidden flex flex-col">
             <div className="px-4 py-3 border-b border-zinc-800 bg-zinc-950/50 flex items-center gap-2">
@@ -121,8 +129,8 @@ function StatGroup({ title, icon, team1Name, team2Name, rows, data, isOpponentRo
                         <tr className="text-zinc-500 text-[10px] uppercase tracking-widest border-b border-zinc-800/50">
                             <th className="pb-2 font-medium">Metric</th>
                             <th className="pb-2 font-medium text-center truncate max-w-[80px]" title={team1Name}>{team1Name.split(' ')[0]}</th>
-                            <th className="pb-2 font-medium text-center truncate max-w-[80px]" title={team2Name}>{team2Name.split(' ')[0]}</th>
-                            <th className="pb-2 font-medium text-center">Avg</th>
+                            {team2Name && <th className="pb-2 font-medium text-center truncate max-w-[80px]" title={team2Name}>{team2Name.split(' ')[0]}</th>}
+                            <th className="pb-2 font-medium text-center">{team2Name ? 'Avg' : 'Val'}</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-800/30">
@@ -131,9 +139,11 @@ function StatGroup({ title, icon, team1Name, team2Name, rows, data, isOpponentRo
                                 const v = path.split('.').reduce((o, i) => o[i], obj)
                                 return row.isInverse ? 100 - v : v
                             }
-                            const val1 = getVal(data.t1, row.key)
-                            const val2 = getVal(data.t2, row.key)
-                            const avgValue = row.isRaw ? (parseFloat(val1) + parseFloat(val2)) / 2 : Math.round((val1 + val2) / 2)
+                            const val1 = data.t1 ? getVal(data.t1, row.key) : 0
+                            const val2 = data.t2 ? getVal(data.t2, row.key) : 0
+                            const avgValue = data.t2
+                                ? (row.isRaw ? (parseFloat(val1) + parseFloat(val2)) / 2 : Math.round((val1 + val2) / 2))
+                                : val1
 
                             return (
                                 <tr key={row.key} className="group hover:bg-zinc-800/20 transition-colors">
@@ -143,14 +153,16 @@ function StatGroup({ title, icon, team1Name, team2Name, rows, data, isOpponentRo
                                             {row.isRaw ? val1 : `${val1}%`}
                                         </div>
                                     </td>
-                                    <td className="py-2.5 text-center">
-                                        <div className={`inline-flex items-center justify-center min-w-[36px] px-1.5 py-0.5 rounded font-mono text-[11px] font-bold ${row.isRaw ? 'text-white' : getProbColor(val2)}`}>
-                                            {row.isRaw ? val2 : `${val2}%`}
-                                        </div>
-                                    </td>
+                                    {team2Name && (
+                                        <td className="py-2.5 text-center">
+                                            <div className={`inline-flex items-center justify-center min-w-[36px] px-1.5 py-0.5 rounded font-mono text-[11px] font-bold ${row.isRaw ? 'text-white' : getProbColor(val2)}`}>
+                                                {row.isRaw ? val2 : `${val2}%`}
+                                            </div>
+                                        </td>
+                                    )}
                                     <td className="py-2.5 text-center">
                                         <div className={`inline-flex items-center justify-center min-w-[36px] px-1.5 py-0.5 rounded font-mono text-[11px] font-bold ${row.isRaw ? 'text-indigo-400' : getProbColor(avgValue as number)}`}>
-                                            {row.isRaw ? avgValue.toFixed(1) : `${avgValue}%`}
+                                            {row.isRaw ? (typeof avgValue === 'number' ? avgValue.toFixed(1) : avgValue) : `${avgValue}%`}
                                         </div>
                                     </td>
                                 </tr>

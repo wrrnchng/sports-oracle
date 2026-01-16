@@ -274,18 +274,26 @@ export async function getTeams(sport: string, league: string): Promise<TeamsResp
 
 export async function getTeamScheduleForSeason(sport: string, league: string, teamId: string, season: number): Promise<TeamSchedule> {
   const url = `${ESPN_BASE_URL}/${sport}/${league}/teams/${teamId}/schedule?season=${season}`
-  // Cache Schedule for 1 hour for old seasons, or 5 mins for current
-  const currentYear = new Date().getFullYear()
-  const ttl = season < currentYear ? 86400 : 300
+
+  const now = new Date()
+  const currentYear = now.getFullYear()
+  const isTransitionMonth = now.getMonth() < 7 // Jan to July
+
+  // For most sports (NFL, Soccer, NBA), the "current" season year is actually the year it started.
+  // In Jan 2026, season 2025 is still very much active.
+  const isCurrentOrActivePastSeason = season === currentYear || (isTransitionMonth && season === currentYear - 1)
+
+  // Cache Schedule for 1 hour for active seasons (they change often), or 24 hours for old ones
+  const ttl = isCurrentOrActivePastSeason ? 3600 : 86400
   return fetchWithCache<TeamSchedule>(`schedule:${sport}:${league}:${teamId}:${season}`, url, ttl)
 }
 
 export async function getTeamSchedule(sport: string, league: string, teamId: string): Promise<TeamSchedule> {
-  // Defaults to current season
+  // Defaults to current active season in ESPN's view
   const url = `${ESPN_BASE_URL}/${sport}/${league}/teams/${teamId}/schedule`
   const data = await fetchWithCache<TeamSchedule>(`schedule:${sport}:${league}:${teamId}`, url, 300)
 
-  // 1. Fetch nextEvent as a fallback/supplement
+  // 1. Fetch nextEvent as a fallback/supplement from the team detail endpoint
   const nextEvent = await getTeamNextEvent(sport, league, teamId)
 
   // 2. Ensure events array exists
@@ -294,82 +302,120 @@ export async function getTeamSchedule(sport: string, league: string, teamId: str
   // 3. If nextEvent exists and isn't in schedule, add it
   if (nextEvent && !data.events.some(e => e.id === nextEvent.id)) {
     data.events.push(nextEvent)
-    // Re-sort to maintain chronological order
-    data.events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
   }
 
-  // Soccer specific: fetch ALL competition types to include cups
+  // 4. Scoreboard Discovery Fallback (Critical for soccer leagues with truncated schedules)
+  // Some leagues (La Liga, Serie A) don't show the second half of the season in the team schedule endpoint.
+  // We also check additional cup competitions because their individual team schedules are often empty.
   if (sport === 'soccer') {
     try {
-      // Fetch different season types: 1=preseason, 2=regular, 3=postseason, 4=offseason
-      // For soccer, we want regular season (2) and cup competitions
-      const seasonTypes = [2, 3] // Regular season and cups/playoffs
+      const now = new Date()
+      // Query scoreboard from 3 days ago until 30 days in the future
+      const pastDate = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000)
+      const dateStr = formatInManila(pastDate, 'yyyyMMdd')
+      const futureDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
+      const futureDateStr = formatInManila(futureDate, 'yyyyMMdd')
 
-      for (const seasonType of seasonTypes) {
+      const discoveryLeagues = [league, 'eng.fa', 'eng.league_cup', 'eng.cup', 'uefa.champions', 'uefa.europa', 'uefa.europa.conf', 'esp.super_cup', 'esp.copa_del_rey', 'ita.cup', 'ger.cup', 'fra.cup']
+
+      for (const dLeague of [...new Set(discoveryLeagues)]) {
         try {
-          const typeUrl = `${ESPN_BASE_URL}/${sport}/${league}/teams/${teamId}/schedule?seasontype=${seasonType}`
-          const typeData = await fetchWithCache<TeamSchedule>(
-            `schedule:${sport}:${league}:${teamId}:type${seasonType}`,
-            typeUrl,
-            300
-          )
+          const sbUrl = `${ESPN_BASE_URL}/${sport}/${dLeague}/scoreboard?dates=${dateStr}-${futureDateStr}`
+          const sbData = await fetchWithCache<any>(`sb_discovery:${sport}:${dLeague}:${dateStr}-${futureDateStr}`, sbUrl, 1800)
 
-          if (typeData.events && typeData.events.length > 0) {
-            // Merge events that aren't already in the list
-            typeData.events.forEach(event => {
-              if (!data.events.some(e => e.id === event.id)) {
-                // Ensure league slug is present for filtering later
-                // We inject it into both the event and competitions[0] to be safe
-                if (!event.league?.slug) {
-                  (event as any).league = { ...(event as any).league, slug: league };
-                }
-                if (event.competitions?.[0] && !event.competitions[0].league?.slug) {
-                  (event.competitions[0] as any).league = { ...(event.competitions[0] as any).league, slug: league };
-                }
-                data.events.push(event)
+          if (sbData.events) {
+            sbData.events.forEach((event: any) => {
+              const isOurTeam = event.competitions?.[0]?.competitors?.some((c: any) => c.team?.id === teamId)
+              if (isOurTeam && !data.events.some(e => e.id === event.id)) {
+                if (!event.league?.slug) event.league = { slug: dLeague };
+                data.events.push(event as TeamScheduleEvent)
               }
             })
           }
-        } catch (e) {
-          // Silently continue if a season type doesn't exist
-          console.warn(`No seasontype ${seasonType} for ${league}`, e)
+        } catch (err) {
+          // Silently skip if a league's scoreboard fails
         }
       }
-
-      // Also fetch from Cup competitions and European competitions
-      const additionalLeagues = ['eng.fa', 'eng.league_cup', 'eng.cup', 'uefa.champions', 'uefa.europa', 'uefa.europa.conf']
-
-      // Filter out only relevant domestic cups based on current league if needed, 
-      // but easier to just try them all (ESPN will return empty if not participating)
-      for (const extraLeague of additionalLeagues) {
-        if (extraLeague === league) continue // Skip the one we already fetched
-
-        try {
-          const extraUrl = `${ESPN_BASE_URL}/${sport}/${extraLeague}/teams/${teamId}/schedule`
-          const extraData = await fetchWithCache<TeamSchedule>(
-            `schedule:${sport}:${extraLeague}:${teamId}`,
-            extraUrl,
-            300
-          )
-
-          if (extraData.events && extraData.events.length > 0) {
-            extraData.events.forEach(event => {
-              if (!data.events.some(e => e.id === event.id)) {
-                data.events.push(event)
-              }
-            })
-          }
-        } catch (e) {
-          // Silently continue
-        }
-      }
-
-      // Re-sort after merging all events
-      data.events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-    } catch (e) {
-      console.warn('Failed to fetch additional soccer competitions', e)
+    } catch (err) {
+      console.warn('Scoreboard discovery failed:', err)
     }
   }
+
+  // 5. Broad Multi-Season/Multi-Type merging
+  if (sport === 'soccer' || sport === 'football' || sport === 'basketball') {
+    try {
+      const now = new Date()
+      const currentYear = now.getFullYear()
+      const isTransitionMonth = now.getMonth() < 7 // Jan to July
+
+      // Season types: 1=pre/main(soccer), 2=regular, 3=postseason
+      // La Liga uses 1 for its main season. NFL/NBA use 2.
+      const seasonTypes = (sport === 'soccer') ? [1, 2] : [2, 3]
+
+      // Seasons: In Jan-July 2026, 2025 is often the active one, but 2026 might contain some leagues too
+      const seasonsToFetch = isTransitionMonth ? [currentYear - 1, currentYear] : [currentYear]
+
+      // Halves: Soccer often uses half=1 and half=2
+      const halvesToFetch = (sport === 'soccer') ? [1, 2] : [undefined]
+
+      for (const season of seasonsToFetch) {
+        for (const seasonType of seasonTypes) {
+          for (const half of halvesToFetch) {
+            try {
+              let urlParams = `?seasontype=${seasonType}&season=${season}`
+              if (half) urlParams += `&half=${half}`
+
+              const typeUrl = `${ESPN_BASE_URL}/${sport}/${league}/teams/${teamId}/schedule${urlParams}`
+              const cacheKey = `schedule:${sport}:${league}:${teamId}:y${season}:t${seasonType}${half ? `:h${half}` : ''}`
+
+              const typeData = await fetchWithCache<TeamSchedule>(cacheKey, typeUrl, 3600)
+
+              if (typeData.events && typeData.events.length > 0) {
+                typeData.events.forEach(event => {
+                  if (!data.events.some(e => e.id === event.id)) {
+                    // Inject missing league metadata
+                    if (!event.league?.slug) {
+                      (event as any).league = { ...(event as any).league, slug: league };
+                    }
+                    data.events.push(event)
+                  }
+                })
+              }
+            } catch (e) {
+              // Ignore failures for specific combinations
+            }
+          }
+        }
+      }
+
+      // 6. Additional Soccer Cup Fetching
+      if (sport === 'soccer') {
+        const additionalLeagues = ['eng.fa', 'eng.league_cup', 'eng.cup', 'uefa.champions', 'uefa.europa', 'uefa.europa.conf', 'esp.super_cup', 'esp.copa_del_rey']
+
+        for (const extraLeague of additionalLeagues) {
+          if (extraLeague === league) continue
+
+          try {
+            const extraUrl = `${ESPN_BASE_URL}/${sport}/${extraLeague}/teams/${teamId}/schedule`
+            const extraData = await fetchWithCache<TeamSchedule>(`schedule:${sport}:${extraLeague}:${teamId}`, extraUrl, 300)
+
+            if (extraData.events && extraData.events.length > 0) {
+              extraData.events.forEach(event => {
+                if (!data.events.some(e => e.id === event.id)) {
+                  data.events.push(event)
+                }
+              })
+            }
+          } catch (e) { }
+        }
+      }
+    } catch (e) {
+      console.warn('Advanced schedule merge failed', e)
+    }
+  }
+
+  // Final re-sort of all discovered events
+  data.events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 
   return data
 }
@@ -490,16 +536,153 @@ export async function getTeamRoster(sport: string, league: string, teamId: strin
   return fetchWithCache<RosterResponse>(`roster:${sport}:${league}:${teamId}`, url, 86400)
 }
 
-export async function getPlayerGamelog(sport: string, league: string, athleteId: string): Promise<PlayerGameLog> {
+export async function getPlayerGamelog(sport: string, league: string, athleteId: string, season?: number): Promise<PlayerGameLog> {
   // Soccer API is different: sports/soccer/athletes/{id}/gamelog (no league)
   // Others use: sports/{sport}/{league}/athletes/{id}/gamelog
   const urlPath = sport === 'soccer'
     ? `sports/soccer/athletes/${athleteId}/gamelog`
     : `sports/${sport}/${league}/athletes/${athleteId}/gamelog`
 
-  const url = `https://site.web.api.espn.com/apis/common/v3/${urlPath}?region=us&lang=en&contentorigin=espn`
-  // Cache Gamelog for 1 hour (updates after games)
-  return fetchWithCache<PlayerGameLog>(`gamelog:${sport}:${league}:${athleteId}`, url, 3600)
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = now.getMonth()
+
+  // Correct season logic:
+  // NBA 2025-26 season is "2026" in ESPN API for games in late 2025 and 2026.
+  // NFL 2025 season (playoffs in Jan 2026) is "2025".
+  // Soccer 2025-26 (e.g. PL) is usually "2025" for the whole cycle (started in 2025).
+  if (!season && year === 2026 && month < 7) {
+    if (sport === 'basketball') {
+      season = 2026 // NBA current season
+    } else if (sport === 'football' || sport === 'soccer') {
+      season = 2025 // NFL or Soccer current active cycle
+    }
+  }
+
+  let seasonParam = season ? `&season=${season}` : '';
+
+  const url = `https://site.web.api.espn.com/apis/common/v3/${urlPath}?region=us&lang=en&contentorigin=espn${seasonParam}`
+  // Cache Gamelog for 1 hour
+  return fetchWithCache<PlayerGameLog>(`gamelog:${sport}:${league}:${athleteId}${seasonParam}`, url, 3600)
+}
+
+/**
+ * Enhanced gamelog that merges multiple seasons to ensure we have recent matches,
+ * and aligns them with the team's schedule if a teamId is provided.
+ */
+export async function getPlayerTeamGamelog(
+  sport: string,
+  league: string,
+  athleteId: string,
+  teamId?: string
+): Promise<PlayerGameLog> {
+  const now = new Date()
+  const currentYear = now.getFullYear()
+  const month = now.getMonth()
+  const isTransition = month < 7
+
+  // Fetch current and previous season to ensure we have recent matches
+  const seasons = isTransition ? [currentYear, currentYear - 1] : [currentYear]
+  // NBA 2025-26 started in late 2025 but the API season id is 2026.
+  if (sport === 'basketball' && isTransition && !seasons.includes(2026)) seasons.push(2026)
+
+  const logs = await Promise.all(seasons.map(s => getPlayerGamelog(sport, league, athleteId, s)))
+
+  // 1. Merge Metadata (eventId -> details)
+  const mergedMetadata: Record<string, any> = {}
+  logs.forEach(log => {
+    if (log.events) {
+      Object.entries(log.events).forEach(([id, meta]) => {
+        mergedMetadata[id] = meta
+      })
+    }
+  })
+
+  // 2. Flatten all player stats events
+  const allPlayerStatsEvents: any[] = []
+  logs.forEach(log => {
+    if (log.seasonTypes) {
+      log.seasonTypes.forEach(st => {
+        st.categories?.forEach(cat => {
+          cat.events?.forEach(event => {
+            if (!allPlayerStatsEvents.some(e => e.eventId === event.eventId)) {
+              allPlayerStatsEvents.push(event)
+            }
+          })
+        })
+      })
+    }
+  })
+
+  // Basic structure from the most recent log
+  const baseLog = logs.find(l => l.seasonTypes?.length) || logs[0]
+
+  if (teamId) {
+    try {
+      const schedule = await getTeamSchedule(sport, league, teamId)
+      const last10Games = schedule.events
+        .filter(e => e.competitions?.[0]?.status?.type?.completed)
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        .slice(0, 10)
+
+      const alignedEvents: any[] = []
+
+      last10Games.forEach(game => {
+        const playerStatsMatch = allPlayerStatsEvents.find(pe => pe.eventId === game.id)
+
+        // Ensure metadata exists for this game (for DNP/trades)
+        if (!mergedMetadata[game.id]) {
+          const comp = game.competitions[0]
+          const opponent = comp.competitors.find(c => c.id !== teamId)?.team
+          const ourTeam = comp.competitors.find(c => c.id === teamId)
+
+          mergedMetadata[game.id] = {
+            gameDate: game.date,
+            gameId: game.id,
+            opponent: {
+              id: opponent?.id,
+              displayName: opponent?.displayName,
+              logo: opponent?.logos?.[0]?.href
+            },
+            gameResult: ourTeam?.winner ? 'W' : 'L'
+          }
+        }
+
+        if (playerStatsMatch) {
+          alignedEvents.push(playerStatsMatch)
+        } else {
+          // DNP Placeholder
+          alignedEvents.push({
+            eventId: game.id,
+            gameDate: game.date, // Redundant but safe
+            stats: []
+          })
+        }
+      })
+
+      // Re-inject into the log structure
+      baseLog.seasonTypes = [{
+        id: "merged",
+        year: currentYear,
+        type: 2,
+        categories: [{
+          name: "aligned",
+          displayName: "Recent Games",
+          shortDisplayName: "Recent",
+          abbreviation: "REC",
+          stats: baseLog.seasonTypes?.[0]?.categories?.[0]?.stats || [],
+          events: alignedEvents
+        }]
+      }]
+    } catch (e) {
+      console.warn("DNP Alignment failed, falling back to basic merge", e)
+    }
+  }
+
+  // Restore metadata record structure
+  baseLog.events = mergedMetadata as any
+
+  return baseLog
 }
 
 /**

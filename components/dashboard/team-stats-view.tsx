@@ -404,13 +404,13 @@ export function TeamStatsView({ sport }: TeamStatsViewProps) {
                     </div>
 
                     {/* Stats Comparison Section */}
-                    {teamStats && opponentStats && (
+                    {teamStats && (
                         <div className="space-y-6">
                             <div className="text-center py-2 bg-zinc-900/30 rounded-lg border border-zinc-800/50">
-                                <span className="text-xs text-zinc-500 italic">* {selectedTeam.displayName} and {upcomingMatch?.competitions[0].competitors.find((c: any) => c.team.id === opponentId)?.team.displayName}&apos;s average prediction data across current season</span>
+                                <span className="text-xs text-zinc-500 italic">* {selectedTeam.displayName} {opponentStats ? `and ${upcomingMatch?.competitions[0].competitors.find((c: any) => c.team.id === opponentId)?.team.displayName}'s` : ''} average prediction data across current season</span>
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className={`grid grid-cols-1 ${opponentStats ? 'md:grid-cols-2' : ''} gap-6`}>
                                 <TeamFormCard
                                     teamName={selectedTeam.displayName}
                                     leagueName={availableLeagues.find(l => l.id === league)?.name || ''}
@@ -419,17 +419,19 @@ export function TeamStatsView({ sport }: TeamStatsViewProps) {
                                     formStats={teamStatsAllComps || teamStats}
                                     sport={sport}
                                 />
-                                <TeamFormCard
-                                    teamName={upcomingMatch?.competitions[0].competitors.find((c: any) => c.team.id === opponentId)?.team.displayName || ''}
-                                    leagueName={availableLeagues.find(l => l.id === league)?.name || ''}
-                                    logo={getTeamLogo(upcomingMatch?.competitions[0].competitors.find((c: any) => c.team.id === opponentId)?.team)}
-                                    leagueStats={opponentStats}
-                                    formStats={opponentStatsAllComps || opponentStats}
-                                    sport={sport}
-                                />
+                                {opponentStats && (
+                                    <TeamFormCard
+                                        teamName={upcomingMatch?.competitions[0].competitors.find((c: any) => c.team.id === opponentId)?.team.displayName || ''}
+                                        leagueName={availableLeagues.find(l => l.id === league)?.name || ''}
+                                        logo={getTeamLogo(upcomingMatch?.competitions[0].competitors.find((c: any) => c.team.id === opponentId)?.team)}
+                                        leagueStats={opponentStats}
+                                        formStats={opponentStatsAllComps || opponentStats}
+                                        sport={sport}
+                                    />
+                                )}
                             </div>
 
-                            {(() => {
+                            {opponentStats && (() => {
                                 const competitors = upcomingMatch?.competitions[0].competitors || []
                                 const homeCompetitor = competitors.find((c: any) => c.homeAway === 'home')
                                 const isSelectedHome = homeCompetitor?.team.id === selectedTeam.id
@@ -480,20 +482,20 @@ export function TeamStatsView({ sport }: TeamStatsViewProps) {
                                     {loadingAdvanced && <Loader2 className="w-4 h-4 animate-spin text-zinc-500" />}
                                 </div>
 
-                                {advancedStats.team1 && advancedStats.team2 && selectedTeam ? (
-                                    sport === 'football' && advancedStats.team1.soccer && advancedStats.team2.soccer ? (
+                                {advancedStats.team1 && selectedTeam ? (
+                                    sport === 'football' && advancedStats.team1.soccer ? (
                                         <SoccerStatBreakdown
                                             team1={{
                                                 name: selectedTeam.displayName,
                                                 stats: advancedStats.team1.soccer.fullTime
                                             }}
-                                            team2={{
+                                            team2={opponentStats ? {
                                                 name: upcomingMatch?.competitions?.[0]?.competitors?.find(c => c.team.id === opponentId)?.team?.displayName || 'Opponent',
-                                                stats: advancedStats.team2.soccer.fullTime
-                                            }}
-                                            fullTime={{ t1: advancedStats.team1.soccer.fullTime, t2: advancedStats.team2.soccer.fullTime }}
-                                            halfTime={{ t1: advancedStats.team1.soccer.halfTime, t2: advancedStats.team2.soccer.halfTime }}
-                                            secondHalf={{ t1: advancedStats.team1.soccer.secondHalf, t2: advancedStats.team2.soccer.secondHalf }}
+                                                stats: advancedStats.team2?.soccer?.fullTime || undefined
+                                            } : undefined}
+                                            fullTime={{ t1: advancedStats.team1.soccer.fullTime, t2: advancedStats.team2?.soccer?.fullTime }}
+                                            halfTime={{ t1: advancedStats.team1.soccer.halfTime, t2: advancedStats.team2?.soccer?.halfTime }}
+                                            secondHalf={{ t1: advancedStats.team1.soccer.secondHalf, t2: advancedStats.team2?.soccer?.secondHalf }}
                                         />
                                     ) : (sport === 'basketball' || sport === 'nfl') && (advancedStats.team1.basketball || advancedStats.team1.nfl) ? (
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -503,12 +505,14 @@ export function TeamStatsView({ sport }: TeamStatsViewProps) {
                                                 nfl={advancedStats.team1.nfl}
                                                 teamName={selectedTeam.displayName}
                                             />
-                                            <DefensiveStatsCard
-                                                sport={sport}
-                                                basketball={advancedStats.team2.basketball}
-                                                nfl={advancedStats.team2.nfl}
-                                                teamName={upcomingMatch?.competitions?.[0]?.competitors?.find(c => c.team.id === opponentId)?.team?.displayName || 'Opponent'}
-                                            />
+                                            {opponentStats && (
+                                                <DefensiveStatsCard
+                                                    sport={sport}
+                                                    basketball={advancedStats.team2?.basketball}
+                                                    nfl={advancedStats.team2?.nfl}
+                                                    teamName={upcomingMatch?.competitions?.[0]?.competitors?.find(c => c.team.id === opponentId)?.team?.displayName || 'Opponent'}
+                                                />
+                                            )}
                                         </div>
                                     ) : null
                                 ) : !loadingAdvanced ? (
